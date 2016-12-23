@@ -1,2 +1,4 @@
 # oklog
-A log management system for cloud-native applications
+
+Prototype components, y'all the real MVP!
+
