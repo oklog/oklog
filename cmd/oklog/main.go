@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -40,6 +41,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  store        Storage node\n")
 	fmt.Fprintf(os.Stderr, "  ingeststore  Combination ingest+store node, for small installations\n")
 	fmt.Fprintf(os.Stderr, "  query        Querying commandline tool\n")
+	fmt.Fprintf(os.Stderr, "  testsvc      Test service, emits log lines at a fixed rate\n")
 	fmt.Fprintf(os.Stderr, "\n")
 }
 
@@ -61,6 +63,8 @@ func main() {
 		run = runIngestStore
 	case "query":
 		run = runQuery
+	case "testsvc":
+		run = runTestService
 	default:
 		usage()
 		os.Exit(1)
@@ -257,6 +261,7 @@ func runIngest(args []string) error {
 		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", 25*1024*1024, "flush segments after they grow to this size")
 		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
 		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
+		filesystem            = flagset.String("filesystem", "real", "real, virtual, nop")
 		clusterPeers          = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
@@ -290,11 +295,6 @@ func runIngest(args []string) error {
 		Name:      "connected_clients",
 		Help:      "Number of currently connected clients by modality.",
 	}, []string{"modality"})
-	clusterDelegateInvocations := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "oklog",
-		Name:      "cluster_delegate_invocations_total",
-		Help:      "Total invocations of cluster delegate callbacks by method.",
-	}, []string{"method"})
 	ingestWriterBytes := prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: "oklog",
 		Name:      "ingest_writer_bytes_written_total",
@@ -328,7 +328,6 @@ func runIngest(args []string) error {
 	}, []string{"method", "path", "status_code"})
 	prometheus.MustRegister(
 		connectedClients,
-		clusterDelegateInvocations,
 		ingestWriterBytes,
 		ingestWriterRecords,
 		ingestWriterSyncs,
@@ -399,7 +398,18 @@ func runIngest(args []string) error {
 	level.Info(logger).Log("API", apiURL.String())
 
 	// Create ingest log and its writer.
-	ingestLog, err := ingest.NewFileLog(fs.NewRealFilesystem(), *ingestPath)
+	var fsys fs.Filesystem
+	switch strings.ToLower(*filesystem) {
+	case "real":
+		fsys = fs.NewRealFilesystem()
+	case "virtual":
+		fsys = fs.NewVirtualFilesystem()
+	case "nop":
+		fsys = fs.NewNopFilesystem()
+	default:
+		return errors.Errorf("invalid -filesystem %q", *filesystem)
+	}
+	ingestLog, err := ingest.NewFileLog(fsys, *ingestPath)
 	if err != nil {
 		return err
 	}
@@ -422,7 +432,6 @@ func runIngest(args []string) error {
 		clusterHost, clusterPort,
 		clusterPeers.slice(),
 		cluster.PeerTypeIngest, apiPort,
-		clusterDelegateInvocations,
 		log.NewContext(logger).With("component", "cluster"),
 	)
 	if err != nil {
@@ -531,11 +540,6 @@ func runStore(args []string) error {
 	logger = level.New(logger, level.Config{Allowed: level.AllowAll()})
 
 	// Instrumentation.
-	clusterDelegateInvocations := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "oklog",
-		Name:      "cluster_delegate_invocations_total",
-		Help:      "Total invocations of cluster delegate callbacks by method.",
-	}, []string{"method"})
 	apiDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "oklog",
 		Name:      "api_request_duration_seconds",
@@ -564,7 +568,6 @@ func runStore(args []string) error {
 		Help:      "Segments purged from trash.",
 	}, []string{"success"})
 	prometheus.MustRegister(
-		clusterDelegateInvocations,
 		apiDuration,
 		compactDuration,
 		replicateBytes,
@@ -618,7 +621,6 @@ func runStore(args []string) error {
 		clusterHost, clusterPort,
 		clusterPeers.slice(),
 		cluster.PeerTypeStore, apiPort,
-		clusterDelegateInvocations,
 		log.NewContext(logger).With("component", "cluster"),
 	)
 	if err != nil {
@@ -710,6 +712,7 @@ func runIngestStore(args []string) error {
 		segmentTargetSize     = flagset.Int64("store.segment-target-size", 100*1024, "try to keep store segments about this size")
 		segmentRetain         = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
 		segmentPurge          = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
+		filesystem            = flagset.String("filesystem", "real", "real, virtual, nop")
 		clusterPeers          = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
@@ -754,11 +757,6 @@ func runIngestStore(args []string) error {
 		Name:      "connected_clients",
 		Help:      "Number of currently connected clients by modality.",
 	}, []string{"modality"})
-	clusterDelegateInvocations := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "oklog",
-		Name:      "cluster_delegate_invocations_total",
-		Help:      "Total invocations of cluster delegate callbacks by method.",
-	}, []string{"method"})
 	ingestWriterBytes := prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: "oklog",
 		Name:      "ingest_writer_bytes_written_total",
@@ -813,7 +811,6 @@ func runIngestStore(args []string) error {
 	}, []string{"success"})
 	prometheus.MustRegister(
 		connectedClients,
-		clusterDelegateInvocations,
 		ingestWriterBytes,
 		ingestWriterRecords,
 		ingestWriterSyncs,
@@ -888,7 +885,18 @@ func runIngestStore(args []string) error {
 	level.Info(logger).Log("API", apiURL.String())
 
 	// Create ingestlog and its writer.
-	ingestLog, err := ingest.NewFileLog(fs.NewRealFilesystem(), *ingestPath)
+	var fsys fs.Filesystem
+	switch strings.ToLower(*filesystem) {
+	case "real":
+		fsys = fs.NewRealFilesystem()
+	case "virtual":
+		fsys = fs.NewVirtualFilesystem()
+	case "nop":
+		fsys = fs.NewNopFilesystem()
+	default:
+		return errors.Errorf("invalid -filesystem %q", *filesystem)
+	}
+	ingestLog, err := ingest.NewFileLog(fsys, *ingestPath)
 	if err != nil {
 		return err
 	}
@@ -918,7 +926,6 @@ func runIngestStore(args []string) error {
 		clusterHost, clusterPort,
 		clusterPeers.slice(),
 		cluster.PeerTypeIngestStore, apiPort,
-		clusterDelegateInvocations,
 		log.NewContext(logger).With("component", "cluster"),
 	)
 	if err != nil {
@@ -1025,15 +1032,15 @@ func runIngestStore(args []string) error {
 }
 
 func runQuery(args []string) error {
-	fs := flag.NewFlagSet("query", flag.ExitOnError)
+	flagset := flag.NewFlagSet("query", flag.ExitOnError)
 	var (
-		storeAddr = fs.String("store", "localhost:7650", "okstore instance")
-		from      = fs.String("from", "-1h", "from, as RFC3339 timestamp or duration")
-		to        = fs.String("to", "now", "to, as RFC3339 timestamp or duration")
-		q         = fs.String("q", "", "query expression")
-		stats     = fs.Bool("stats", false, "statistics only, no records")
+		storeAddr = flagset.String("store", "localhost:7650", "okstore instance")
+		from      = flagset.String("from", "-1h", "from, as RFC3339 timestamp or duration")
+		to        = flagset.String("to", "now", "to, as RFC3339 timestamp or duration")
+		q         = flagset.String("q", "", "query expression")
+		stats     = flagset.Bool("stats", false, "statistics only, no records")
 	)
-	if err := fs.Parse(args); err != nil {
+	if err := flagset.Parse(args); err != nil {
 		return err
 	}
 
@@ -1100,6 +1107,65 @@ func runQuery(args []string) error {
 	fmt.Fprintf(os.Stderr, "%d error(s)\n", result.ErrorCount)
 	io.Copy(os.Stdout, result.Records)
 	result.Records.Close()
+	return nil
+}
+
+func runTestService(args []string) error {
+	flagset := flag.NewFlagSet("testsvc", flag.ExitOnError)
+	var (
+		id   = flagset.String("id", "foo", "ID for this instance")
+		rate = flagset.Int("rate", 5, "records per second")
+	)
+	if err := flagset.Parse(args); err != nil {
+		return err
+	}
+
+	var (
+		nBytes   uint64
+		nRecords uint64
+	)
+
+	printRate := func(d time.Duration, printEvery int) {
+		var prevBytes, prevRecords, iterationCount uint64
+		for range time.Tick(d) {
+			currBytes := atomic.LoadUint64(&nBytes)
+			currRecords := atomic.LoadUint64(&nRecords)
+			bytesPerSec := (float64(currBytes) - float64(prevBytes)) / d.Seconds()
+			recordsPerSec := (float64(currRecords) - float64(prevRecords)) / d.Seconds()
+
+			prevBytes = currBytes
+			prevRecords = currRecords
+
+			iterationCount++
+			if iterationCount%uint64(printEvery) == 0 {
+				fmt.Fprintf(os.Stderr, "%2ds average: %.2f bytes/sec, %.2f records/sec\n", int(d.Seconds()), bytesPerSec, recordsPerSec)
+			}
+
+		}
+	}
+	go printRate(1*time.Second, 10)
+	go printRate(10*time.Second, 1)
+
+	fmt.Fprintf(os.Stderr, "%s starting, %d records per second\n", *id, *rate)
+
+	rand.Seed(time.Now().UnixNano())
+	var count uint64
+	hz := float64(time.Second) / float64(*rate)
+	for range time.Tick(time.Duration(hz)) {
+		count++
+		if n, err := fmt.Fprintf(os.Stdout,
+			"%s %s %d %s\n",
+			time.Now().Format(time.RFC3339),
+			*id,
+			count,
+			testServiceRecords[rand.Intn(len(testServiceRecords))],
+		); err != nil {
+			fmt.Fprintf(os.Stderr, "%d: %v\n", count, err)
+		} else {
+			atomic.AddUint64(&nBytes, uint64(n))
+			atomic.AddUint64(&nRecords, 1)
+		}
+	}
 	return nil
 }
 
