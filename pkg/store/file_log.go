@@ -18,6 +18,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/oklog/prototype/pkg/fs"
 	"github.com/oklog/ulid"
 )
 
@@ -31,11 +32,12 @@ const (
 // NewFileLog returns a Log backed by the filesystem at path root.
 // Note that we don't own segment files! They may disappear.
 // TODO(pb): abstract the filesystem to make this unit-testable.
-func NewFileLog(root string, segmentTargetSize int64) (Log, error) {
-	if err := os.MkdirAll(root, 0755); err != nil {
+func NewFileLog(fs fs.Filesystem, root string, segmentTargetSize int64) (Log, error) {
+	if err := fs.MkdirAll(root); err != nil {
 		return nil, err
 	}
 	return &fileLog{
+		fs:                fs,
 		root:              root,
 		segmentTargetSize: segmentTargetSize,
 		entropy:           rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -43,6 +45,7 @@ func NewFileLog(root string, segmentTargetSize int64) (Log, error) {
 }
 
 type fileLog struct {
+	fs                fs.Filesystem
 	root              string
 	segmentTargetSize int64
 	invocations       *prometheus.CounterVec // component, method
@@ -51,11 +54,11 @@ type fileLog struct {
 
 func (log *fileLog) Create() (WriteSegment, error) {
 	filename := filepath.Join(log.root, fmt.Sprintf("%s%s", uuid.New(), extActive))
-	f, err := os.Create(filename)
+	f, err := log.fs.Create(filename)
 	if err != nil {
 		return nil, err
 	}
-	return &fileWriteSegment{f}, nil
+	return &fileWriteSegment{log.fs, f}, nil
 }
 
 func (log *fileLog) Query(from, to time.Time, q string, statsOnly bool) (QueryResult, error) {
@@ -99,7 +102,7 @@ func (log *fileLog) Query(from, to time.Time, q string, statsOnly bool) (QueryRe
 	// TODO(pb): use ripgrep instead
 	var readers []io.Reader
 	for _, segment := range segments {
-		f, err := os.Open(segment)
+		f, err := log.fs.Open(segment)
 		if err != nil {
 			continue
 		}
@@ -207,7 +210,7 @@ func (log *fileLog) Overlapping() ([]ReadSegment, error) {
 	// Create ReadSegments.
 	readSegments := make([]ReadSegment, len(candidates))
 	for i, path := range candidates {
-		readSegment, err := newFileReadSegment(path)
+		readSegment, err := newFileReadSegment(log.fs, path)
 		if err != nil {
 			return nil, err
 		}
@@ -252,7 +255,7 @@ func (log *fileLog) Sequential() ([]ReadSegment, error) {
 	// Create ReadSegments.
 	readSegments := make([]ReadSegment, len(candidates))
 	for i, path := range candidates {
-		readSegment, err := newFileReadSegment(path)
+		readSegment, err := newFileReadSegment(log.fs, path)
 		if err != nil {
 			return nil, err
 		}
@@ -293,7 +296,7 @@ func (log *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
 	// We have some candidates. Create and return ReadSegments.
 	readSegments := make([]ReadSegment, len(candidates))
 	for i, path := range candidates {
-		readSegment, err := newFileReadSegment(path)
+		readSegment, err := newFileReadSegment(log.fs, path)
 		if err != nil {
 			return nil, err
 		}
@@ -327,11 +330,11 @@ func (log *fileLog) Purgeable(oldestModTime time.Time) ([]TrashSegment, error) {
 	// We have some candidates. Create and return TrashSegments.
 	trashSegments := make([]TrashSegment, len(candidates))
 	for i, path := range candidates {
-		f, err := os.Open(path)
+		f, err := log.fs.Open(path)
 		if err != nil {
 			return nil, errors.Wrap(err, "opening candidate segment for read")
 		}
-		trashSegments[i] = fileTrashSegment{f}
+		trashSegments[i] = fileTrashSegment{log.fs, f}
 	}
 	return trashSegments, nil
 }
@@ -365,92 +368,99 @@ func (log *fileLog) Stats() (LogStats, error) {
 }
 
 type fileWriteSegment struct {
-	*os.File
+	fs fs.Filesystem
+	f  fs.File
+}
+
+func (w fileWriteSegment) Write(p []byte) (int, error) {
+	return w.f.Write(p)
 }
 
 // Close the segment and make it available for query.
 func (w fileWriteSegment) Close(low, high ulid.ULID) error {
-	if err := w.File.Sync(); err != nil { // TODO(pb): is this necessary?
+	if err := w.f.Close(); err != nil {
 		return err
 	}
-	if err := w.File.Close(); err != nil {
-		return err
-	}
-	oldname := w.File.Name()
+	oldname := w.f.Name()
 	oldpath := filepath.Dir(oldname)
 	newname := filepath.Join(oldpath, fmt.Sprintf("%s-%s%s", low.String(), high.String(), extFlushed))
-	if _, err := os.Stat(newname); !os.IsNotExist(err) {
-		// ...
+	if w.fs.Exists(newname) {
 		return errors.Errorf("file %s already exists", newname)
 	}
-	return os.Rename(oldname, newname)
+	return w.fs.Rename(oldname, newname)
 }
 
 // Delete the segment.
 func (w fileWriteSegment) Delete() error {
-	if err := w.File.Close(); err != nil {
+	if err := w.f.Close(); err != nil {
 		return err
 	}
-	return os.Remove(w.File.Name())
+	return w.fs.Remove(w.f.Name())
 }
 
 type fileReadSegment struct {
-	*os.File
+	fs fs.Filesystem
+	f  fs.File
 }
 
-func newFileReadSegment(path string) (fileReadSegment, error) {
+func newFileReadSegment(fs fs.Filesystem, path string) (fileReadSegment, error) {
 	if filepath.Ext(path) != extFlushed {
 		return fileReadSegment{}, errors.Errorf("newFileReadSegment from non-flushed file %s", path)
 	}
 	oldpath := path
 	newpath := modifyExtension(oldpath, extReading)
-	if err := os.Rename(oldpath, newpath); err != nil {
+	if err := fs.Rename(oldpath, newpath); err != nil {
 		return fileReadSegment{}, err
 	}
-	f, err := os.Open(newpath)
+	f, err := fs.Open(newpath)
 	if err != nil {
 		return fileReadSegment{}, err
 	}
-	return fileReadSegment{f}, nil
+	return fileReadSegment{fs, f}, nil
+}
+
+func (r fileReadSegment) Read(p []byte) (int, error) {
+	return r.f.Read(p)
 }
 
 func (r fileReadSegment) Reset() error {
-	if err := r.File.Close(); err != nil {
+	if err := r.f.Close(); err != nil {
 		return err
 	}
-	oldpath := r.File.Name()
+	oldpath := r.f.Name()
 	newpath := modifyExtension(oldpath, extFlushed)
-	return os.Rename(oldpath, newpath)
+	return r.fs.Rename(oldpath, newpath)
 }
 
 func (r fileReadSegment) Trash() error {
-	if err := r.File.Close(); err != nil {
+	if err := r.f.Close(); err != nil {
 		return err
 	}
-	oldpath := r.File.Name()
+	oldpath := r.f.Name()
 	newpath := modifyExtension(oldpath, extTrashed)
-	if err := os.Rename(oldpath, newpath); err != nil {
+	if err := r.fs.Rename(oldpath, newpath); err != nil {
 		return err
 	}
-	return os.Chtimes(newpath, time.Now(), time.Now())
+	return r.fs.Chtimes(newpath, time.Now(), time.Now())
 }
 
 func (r fileReadSegment) Purge() error {
-	if err := r.File.Close(); err != nil {
+	if err := r.f.Close(); err != nil {
 		return err
 	}
-	return os.Remove(r.File.Name())
+	return r.fs.Remove(r.f.Name())
 }
 
 type fileTrashSegment struct {
-	*os.File
+	fs fs.Filesystem
+	f  fs.File
 }
 
 func (t fileTrashSegment) Purge() error {
-	if err := t.File.Close(); err != nil {
+	if err := t.f.Close(); err != nil {
 		return err
 	}
-	return os.Remove(t.File.Name())
+	return t.fs.Remove(t.f.Name())
 }
 
 func chooseFirstSequential(segments sortableSegments, minimum int, targetSize int64) []string {
