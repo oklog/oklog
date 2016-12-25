@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/oklog/prototype/pkg/cluster"
+	"github.com/oklog/prototype/pkg/fs"
 	"github.com/oklog/prototype/pkg/group"
 	"github.com/oklog/prototype/pkg/ingest"
 	"github.com/oklog/prototype/pkg/store"
@@ -245,21 +246,21 @@ func exponential(d time.Duration) time.Duration {
 }
 
 func runIngest(args []string) error {
-	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
+	flagset := flag.NewFlagSet("ingest", flag.ExitOnError)
 	var (
-		apiAddr               = fs.String("api", "tcp://0.0.0.0:7650", "listen address for ingest API")
-		fastAddr              = fs.String("ingest.fast", "tcp://0.0.0.0:7651", "listen address for fast (async) writes")
-		durableAddr           = fs.String("ingest.durable", "tcp://0.0.0.0:7652", "listen address for durable (sync) writes")
-		bulkAddr              = fs.String("ingest.bulk", "tcp://0.0.0.0:7653", "listen address for bulk (whole-segment) writes")
-		clusterAddr           = fs.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
-		ingestPath            = fs.String("ingest.path", filepath.Join("data", "ingest"), "path holding segment files for ingest tier")
-		segmentFlushSize      = fs.Int("ingest.segment-flush-size", 25*1024*1024, "flush segments after they grow to this size")
-		segmentFlushAge       = fs.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
-		segmentPendingTimeout = fs.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
+		apiAddr               = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for ingest API")
+		fastAddr              = flagset.String("ingest.fast", "tcp://0.0.0.0:7651", "listen address for fast (async) writes")
+		durableAddr           = flagset.String("ingest.durable", "tcp://0.0.0.0:7652", "listen address for durable (sync) writes")
+		bulkAddr              = flagset.String("ingest.bulk", "tcp://0.0.0.0:7653", "listen address for bulk (whole-segment) writes")
+		clusterAddr           = flagset.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
+		ingestPath            = flagset.String("ingest.path", filepath.Join("data", "ingest"), "path holding segment files for ingest tier")
+		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", 25*1024*1024, "flush segments after they grow to this size")
+		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
+		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
 		clusterPeers          = stringset{}
 	)
-	fs.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
-	if err := fs.Parse(args); err != nil {
+	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
+	if err := flagset.Parse(args); err != nil {
 		return err
 	}
 
@@ -397,7 +398,7 @@ func runIngest(args []string) error {
 	level.Info(logger).Log("API", apiURL.String())
 
 	// Create ingest log and its writer.
-	ingestLog, err := ingest.NewFileLog(*ingestPath)
+	ingestLog, err := ingest.NewFileLog(fs.NewRealFilesystem(), *ingestPath)
 	if err != nil {
 		return err
 	}
@@ -492,18 +493,18 @@ func runIngest(args []string) error {
 }
 
 func runStore(args []string) error {
-	fs := flag.NewFlagSet("store", flag.ExitOnError)
+	flagset := flag.NewFlagSet("store", flag.ExitOnError)
 	var (
-		apiAddr           = fs.String("api", "tcp://0.0.0.0:7650", "listen address for store API")
-		clusterAddr       = fs.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
-		storePath         = fs.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
-		segmentTargetSize = fs.Int64("store.segment-target-size", 100*1024, "try to keep store segments about this size")
-		segmentRetain     = fs.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
-		segmentPurge      = fs.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
+		apiAddr           = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for store API")
+		clusterAddr       = flagset.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
+		storePath         = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
+		segmentTargetSize = flagset.Int64("store.segment-target-size", 100*1024, "try to keep store segments about this size")
+		segmentRetain     = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
+		segmentPurge      = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
 		clusterPeers      = stringset{}
 	)
-	fs.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
-	if err := fs.Parse(args); err != nil {
+	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
+	if err := flagset.Parse(args); err != nil {
 		return err
 	}
 
@@ -692,25 +693,25 @@ func runStore(args []string) error {
 }
 
 func runIngestStore(args []string) error {
-	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
+	flagset := flag.NewFlagSet("ingest", flag.ExitOnError)
 	var (
-		apiAddr               = fs.String("api", "tcp://0.0.0.0:7650", "listen address for ingest and store APIs")
-		fastAddr              = fs.String("ingest.fast", "tcp://0.0.0.0:7651", "listen address for fast (async) writes")
-		durableAddr           = fs.String("ingest.durable", "tcp://0.0.0.0:7652", "listen address for durable (sync) writes")
-		bulkAddr              = fs.String("ingest.bulk", "tcp://0.0.0.0:7653", "listen address for bulk (whole-segment) writes")
-		clusterAddr           = fs.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
-		ingestPath            = fs.String("ingest.path", filepath.Join("data", "ingest"), "path holding segment files for ingest tier")
-		segmentFlushSize      = fs.Int("ingest.segment-flush-size", 25*1024*1024, "flush segments after they grow to this size")
-		segmentFlushAge       = fs.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
-		segmentPendingTimeout = fs.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
-		storePath             = fs.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
-		segmentTargetSize     = fs.Int64("store.segment-target-size", 100*1024, "try to keep store segments about this size")
-		segmentRetain         = fs.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
-		segmentPurge          = fs.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
+		apiAddr               = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for ingest and store APIs")
+		fastAddr              = flagset.String("ingest.fast", "tcp://0.0.0.0:7651", "listen address for fast (async) writes")
+		durableAddr           = flagset.String("ingest.durable", "tcp://0.0.0.0:7652", "listen address for durable (sync) writes")
+		bulkAddr              = flagset.String("ingest.bulk", "tcp://0.0.0.0:7653", "listen address for bulk (whole-segment) writes")
+		clusterAddr           = flagset.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
+		ingestPath            = flagset.String("ingest.path", filepath.Join("data", "ingest"), "path holding segment files for ingest tier")
+		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", 25*1024*1024, "flush segments after they grow to this size")
+		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
+		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
+		storePath             = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
+		segmentTargetSize     = flagset.Int64("store.segment-target-size", 100*1024, "try to keep store segments about this size")
+		segmentRetain         = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
+		segmentPurge          = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
 		clusterPeers          = stringset{}
 	)
-	fs.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
-	if err := fs.Parse(args); err != nil {
+	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
+	if err := flagset.Parse(args); err != nil {
 		return err
 	}
 
@@ -884,7 +885,7 @@ func runIngestStore(args []string) error {
 	level.Info(logger).Log("API", apiURL.String())
 
 	// Create ingestlog and its writer.
-	ingestLog, err := ingest.NewFileLog(*ingestPath)
+	ingestLog, err := ingest.NewFileLog(fs.NewRealFilesystem(), *ingestPath)
 	if err != nil {
 		return err
 	}
@@ -1024,10 +1025,10 @@ func runQuery(args []string) error {
 	fs := flag.NewFlagSet("query", flag.ExitOnError)
 	var (
 		storeAddr = fs.String("store", "localhost:7650", "okstore instance")
-		from      = fs.String("from", time.Now().Add(-1*time.Hour).Format(time.RFC3339Nano), "from (RFC3339 or duration)")
-		to        = fs.String("to", time.Now().Format(time.RFC3339Nano), "to (RFC3339 or duration)")
+		from      = fs.String("from", "-1h", "from, as RFC3339 timestamp or duration")
+		to        = fs.String("to", "now", "to, as RFC3339 timestamp or duration")
 		q         = fs.String("q", "", "query expression")
-		stats     = fs.Bool("stats", false, "statistics only, no data")
+		stats     = fs.Bool("stats", false, "statistics only, no records")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1035,8 +1036,11 @@ func runQuery(args []string) error {
 
 	fromDuration, durationErr := time.ParseDuration(*from)
 	fromTime, timeErr := time.Parse(time.RFC3339Nano, *from)
+	fromNow := strings.ToLower(*from) == "now"
 	var fromStr string
 	switch {
+	case fromNow:
+		fromStr = time.Now().Format(time.RFC3339Nano)
 	case durationErr == nil && timeErr != nil:
 		fromStr = time.Now().Add(fromDuration).Format(time.RFC3339Nano)
 	case durationErr != nil && timeErr == nil:
@@ -1047,8 +1051,11 @@ func runQuery(args []string) error {
 
 	toDuration, durationErr := time.ParseDuration(*to)
 	toTime, timeErr := time.Parse(time.RFC3339Nano, *to)
+	toNow := strings.ToLower(*to) == "now"
 	var toStr string
 	switch {
+	case toNow:
+		toStr = time.Now().Format(time.RFC3339Nano)
 	case durationErr == nil && timeErr != nil:
 		toStr = time.Now().Add(toDuration).Format(time.RFC3339Nano)
 	case durationErr != nil && timeErr == nil:
@@ -1057,7 +1064,7 @@ func runQuery(args []string) error {
 		return fmt.Errorf("couldn't parse -to (%q) as either duration or time", *to)
 	}
 
-	fmt.Fprintf(os.Stderr, "-from=%s -to=%s\n", fromStr, toStr)
+	fmt.Fprintf(os.Stderr, "-from %s -to %s\n", fromStr, toStr)
 
 	method := "GET"
 	if *stats {

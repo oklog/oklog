@@ -1,0 +1,29 @@
+// Package fs abstracts the filesystem.
+package fs
+
+import (
+	"io"
+	"path/filepath"
+	"time"
+)
+
+// Filesystem collects the operations we need from a filesystem.
+type Filesystem interface {
+	Create(path string) (File, error)
+	Open(path string) (File, error)
+	Remove(path string) error
+	Rename(oldname, newname string) error
+	Exists(path string) bool
+	MkdirAll(path string) error
+	Chtimes(path string, atime, mtime time.Time) error
+	Walk(root string, walkFn filepath.WalkFunc) error
+}
+
+// File is the subset of methods we use on an *os.File.
+type File interface {
+	io.Reader
+	io.Writer
+	io.Closer
+	Name() string
+	Sync() error
+}

@@ -8,22 +8,9 @@ import (
 	"time"
 
 	"github.com/pborman/uuid"
+
+	"github.com/oklog/prototype/pkg/fs"
 )
-
-// NewFileLog returns a Log backed by the filesystem at path root.
-// TODO(pb): abstract the filesystem to make this unit-testable.
-func NewFileLog(root string) (Log, error) {
-	if err := os.MkdirAll(root, 0755); err != nil {
-		return nil, err
-	}
-	return &fileLog{
-		root: root,
-	}, nil
-}
-
-type fileLog struct {
-	root string
-}
 
 const (
 	extActive  = ".active"
@@ -31,16 +18,33 @@ const (
 	extPending = ".pending"
 )
 
+// NewFileLog returns a Log implemented via the filesystem.
+// All filesystem ops will be rooted at path root.
+func NewFileLog(fs fs.Filesystem, root string) (Log, error) {
+	if err := fs.MkdirAll(root); err != nil {
+		return nil, err
+	}
+	return &fileLog{
+		fs:   fs,
+		root: root,
+	}, nil
+}
+
+type fileLog struct {
+	fs   fs.Filesystem
+	root string
+}
+
 // Create returns a new writable segment.
 func (log *fileLog) Create() (WriteSegment, error) {
 	filename := filepath.Join(log.root, fmt.Sprintf("%s%s", uuid.New(), extActive))
 
-	f, err := os.Create(filename)
+	f, err := log.fs.Create(filename)
 	if err != nil {
 		return nil, err
 	}
 
-	return fileWriteSegment{f}, nil
+	return fileWriteSegment{log.fs, f}, nil
 }
 
 // Oldest returns the oldest flushed segment.
@@ -49,7 +53,7 @@ func (log *fileLog) Oldest() (ReadSegment, error) {
 		oldest = time.Now()
 		chosen string
 	)
-	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+	log.fs.Walk(log.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -71,24 +75,24 @@ func (log *fileLog) Oldest() (ReadSegment, error) {
 	// This can be racy. But if the rename fails, no problem.
 	// Someone else got it; our client can just try again.
 	newname := modifyExtension(chosen, extPending)
-	if err := os.Rename(chosen, newname); err != nil {
+	if err := log.fs.Rename(chosen, newname); err != nil {
 		return nil, errors.New("race when fetching oldest; please try again")
 	}
 
-	f, err := os.Open(newname)
+	f, err := log.fs.Open(newname)
 	if err != nil {
-		if err := os.Rename(newname, chosen); err != nil {
+		if err := log.fs.Rename(newname, chosen); err != nil {
 			panic(err)
 		}
 		return nil, err
 	}
 
-	return fileReadSegment{f}, nil
+	return fileReadSegment{log.fs, f}, nil
 }
 
 func (log *fileLog) Stats() (LogStats, error) {
 	var stats LogStats
-	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+	log.fs.Walk(log.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -112,46 +116,60 @@ func (log *fileLog) Stats() (LogStats, error) {
 }
 
 type fileWriteSegment struct {
-	*os.File
+	fs fs.Filesystem
+	f  fs.File
+}
+
+func (w fileWriteSegment) Write(p []byte) (int, error) {
+	return w.f.Write(p)
+}
+
+func (w fileWriteSegment) Sync() error {
+	return w.f.Sync()
 }
 
 // Close closes the segment and makes it available for read.
 func (w fileWriteSegment) Close() error {
-	if err := w.File.Close(); err != nil {
+	if err := w.f.Close(); err != nil {
 		return err
 	}
-	oldname := w.File.Name()
+	oldname := w.f.Name()
 	newname := modifyExtension(oldname, extFlushed)
-	return os.Rename(oldname, newname)
+	return w.fs.Rename(oldname, newname)
 }
 
 func (w fileWriteSegment) Delete() error {
-	if err := w.File.Close(); err != nil {
+	if err := w.f.Close(); err != nil {
 		return err
 	}
-	return os.Remove(w.File.Name())
+	return w.fs.Remove(w.f.Name())
 }
 
 type fileReadSegment struct {
-	*os.File
+	fs fs.Filesystem
+	f  fs.File
+}
+
+func (r fileReadSegment) Read(p []byte) (int, error) {
+	return r.f.Read(p)
 }
 
 // Commit closes and deletes the segment.
 func (r fileReadSegment) Commit() error {
-	if err := r.File.Close(); err != nil {
+	if err := r.f.Close(); err != nil {
 		return err
 	}
-	return os.Remove(r.File.Name())
+	return r.fs.Remove(r.f.Name())
 }
 
 // Failed closes the segment and makes it available again.
 func (r fileReadSegment) Failed() error {
-	if err := r.File.Close(); err != nil {
+	if err := r.f.Close(); err != nil {
 		return err
 	}
-	oldname := r.File.Name()
+	oldname := r.f.Name()
 	newname := modifyExtension(oldname, extFlushed)
-	return os.Rename(oldname, newname)
+	return r.fs.Rename(oldname, newname)
 }
 
 func modifyExtension(filename, newExt string) string {

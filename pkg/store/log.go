@@ -24,7 +24,7 @@ type Log interface {
 	// compacted.
 	Sequential() ([]ReadSegment, error)
 
-	// Trashable segments are read segments whose oldest record is older than
+	// Trashable segments are read segments whose newest record is older than
 	// the given time. They may be trashed, i.e. made unavailable for querying.
 	Trashable(oldestRecord time.Time) ([]ReadSegment, error)
 
@@ -37,18 +37,18 @@ type Log interface {
 	Stats() (LogStats, error)
 }
 
-// ErrNoSegmentsAvailable is returned by Compactable,
-// when no segments are available for compacting.
+// ErrNoSegmentsAvailable is returned by various methods to
+// indicate no qualifying segments are currently available.
 var ErrNoSegmentsAvailable = errors.New("no segments available")
 
-// WriteSegment can be written to, and closed (synced) or deleted.
+// WriteSegment can be written to, and either closed or deleted.
 type WriteSegment interface {
 	io.Writer
 	Close(low, high ulid.ULID) error
 	Delete() error
 }
 
-// ReadSegment can be read from, reset (to flushed state), trashed (made
+// ReadSegment can be read from, reset (back to flushed state), trashed (made
 // unavailable for queries), or purged (hard deleted).
 type ReadSegment interface {
 	io.Reader
