@@ -109,11 +109,11 @@ type virtualFile struct {
 	mtime time.Time
 }
 
-func (f virtualFile) Read(p []byte) (int, error)  { return f.buf.Read(p) }
-func (f virtualFile) Write(p []byte) (int, error) { return f.buf.Write(p) }
-func (f virtualFile) Close() error                { return nil }
-func (f virtualFile) Name() string                { return f.name }
-func (f virtualFile) Sync() error                 { return nil }
+func (f *virtualFile) Read(p []byte) (int, error)  { return f.buf.Read(p) }
+func (f *virtualFile) Write(p []byte) (int, error) { return f.buf.Write(p) }
+func (f *virtualFile) Close() error                { return nil }
+func (f *virtualFile) Name() string                { return f.name }
+func (f *virtualFile) Sync() error                 { return nil }
 
 type virtualFileInfo struct {
 	name  string
