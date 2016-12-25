@@ -28,8 +28,7 @@ type Peer struct {
 	d  *delegate
 }
 
-// PeerType enumerates the two types of nodes in the cluster.
-// A peer may be one or the other.
+// PeerType enumerates the types of nodes in the cluster.
 type PeerType string
 
 const (
