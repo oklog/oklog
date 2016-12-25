@@ -19,7 +19,6 @@ import (
 	level "github.com/go-kit/kit/log/experimental_level"
 	"github.com/hashicorp/memberlist"
 	"github.com/pborman/uuid"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Peer represents this node in the cluster.
@@ -45,23 +44,31 @@ const (
 // NewPeer creates or joins a cluster with the existing peers.
 // We will listen for cluster communications on the given addr:port.
 // We advertise a PeerType HTTP API, reachable on apiPort.
-func NewPeer(addr string, port int, existing []string, t PeerType, apiPort int, delegateInvocations *prometheus.CounterVec, logger log.Logger) (*Peer, error) {
-	d := newDelegate(delegateInvocations, logger)
+func NewPeer(addr string, port int, existing []string, t PeerType, apiPort int, logger log.Logger) (*Peer, error) {
+	d := newDelegate(logger)
 	conf := memberlistConfig(addr, port, d, d)
 	ml, err := memberlist.Create(conf)
 	if err != nil {
 		return nil, err
 	}
 	d.init(conf.Name, t, ml.LocalNode().Addr.String(), apiPort, ml.NumMembers)
-	n, err := ml.Join(existing)
-	if err != nil {
-		return nil, err
-	}
+	n, _ := ml.Join(existing)
 	level.Debug(logger).Log("Join", n)
+	if len(existing) > 0 {
+		go warnIfAlone(ml, logger, 5*time.Second)
+	}
 	return &Peer{
 		ml: ml,
 		d:  d,
 	}, nil
+}
+
+func warnIfAlone(ml *memberlist.Memberlist, logger log.Logger, d time.Duration) {
+	for range time.Tick(d) {
+		if n := ml.NumMembers(); n <= 1 {
+			level.Warn(logger).Log("NumMembers", n)
+		}
+	}
 }
 
 // Leave the cluster, waiting up to timeout.
@@ -110,11 +117,10 @@ func memberlistConfig(addr string, port int, delegate memberlist.Delegate, event
 // Clients must invoke init before the delegate can be used.
 // Inspired by https://github.com/asim/memberlist/blob/master/memberlist.go
 type delegate struct {
-	mtx         sync.RWMutex
-	bcast       *memberlist.TransmitLimitedQueue
-	data        map[string]peerInfo
-	invocations *prometheus.CounterVec // method
-	logger      log.Logger
+	mtx    sync.RWMutex
+	bcast  *memberlist.TransmitLimitedQueue
+	data   map[string]peerInfo
+	logger log.Logger
 }
 
 type peerInfo struct {
@@ -123,12 +129,11 @@ type peerInfo struct {
 	APIPort int      `json:"api_port"`
 }
 
-func newDelegate(invocations *prometheus.CounterVec, logger log.Logger) *delegate {
+func newDelegate(logger log.Logger) *delegate {
 	return &delegate{
-		bcast:       nil,
-		data:        map[string]peerInfo{},
-		invocations: invocations,
-		logger:      logger,
+		bcast:  nil,
+		data:   map[string]peerInfo{},
+		logger: logger,
 	}
 }
 
@@ -163,7 +168,11 @@ func (d *delegate) current(t PeerType) (res []string) {
 func (d *delegate) state() map[string]peerInfo {
 	d.mtx.RLock()
 	defer d.mtx.RUnlock()
-	return d.data
+	res := map[string]peerInfo{}
+	for k, v := range d.data {
+		res[k] = v
+	}
+	return res
 }
 
 // NodeMeta is used to retrieve meta-data about the current node
@@ -171,7 +180,6 @@ func (d *delegate) state() map[string]peerInfo {
 // the given byte size. This metadata is available in the Node structure.
 // Implements memberlist.Delegate.
 func (d *delegate) NodeMeta(limit int) []byte {
-	d.invocations.WithLabelValues("NodeMeta").Inc()
 	d.mtx.RLock()
 	defer d.mtx.RUnlock()
 	return []byte{} // no metadata
@@ -183,7 +191,6 @@ func (d *delegate) NodeMeta(limit int) []byte {
 // slice may be modified after the call returns, so it should be copied if needed.
 // Implements memberlist.Delegate.
 func (d *delegate) NotifyMsg(b []byte) {
-	d.invocations.WithLabelValues("NotifyMsg").Inc()
 	if len(b) == 0 {
 		return
 	}
@@ -208,7 +215,6 @@ func (d *delegate) NotifyMsg(b []byte) {
 // since doing so would block the entire UDP packet receive loop.
 // Implements memberlist.Delegate.
 func (d *delegate) GetBroadcasts(overhead, limit int) [][]byte {
-	d.invocations.WithLabelValues("GetBroadcasts").Inc()
 	d.mtx.RLock()
 	defer d.mtx.RUnlock()
 	if d.bcast == nil {
@@ -223,7 +229,6 @@ func (d *delegate) GetBroadcasts(overhead, limit int) [][]byte {
 // boolean indicates this is for a join instead of a push/pull.
 // Implements memberlist.Delegate.
 func (d *delegate) LocalState(join bool) []byte {
-	d.invocations.WithLabelValues("LocalState").Inc()
 	d.mtx.RLock()
 	defer d.mtx.RUnlock()
 	buf, err := json.Marshal(d.data)
@@ -239,7 +244,6 @@ func (d *delegate) LocalState(join bool) []byte {
 // boolean indicates this is for a join instead of a push/pull.
 // Implements memberlist.Delegate.
 func (d *delegate) MergeRemoteState(buf []byte, join bool) {
-	d.invocations.WithLabelValues("MergeRemoteState").Inc()
 	if len(buf) == 0 {
 		level.Debug(d.logger).Log("method", "MergeRemoteState", "join", join, "buf_sz", 0)
 		return
@@ -260,21 +264,18 @@ func (d *delegate) MergeRemoteState(buf []byte, join bool) {
 // The Node argument must not be modified.
 // Implements memberlist.EventDelegate.
 func (d *delegate) NotifyJoin(n *memberlist.Node) {
-	d.invocations.WithLabelValues("NotifyJoin").Inc()
 }
 
 // NotifyUpdate is invoked when a node is detected to have updated, usually
 // involving the meta data. The Node argument must not be modified.
 // Implements memberlist.EventDelegate.
 func (d *delegate) NotifyUpdate(n *memberlist.Node) {
-	d.invocations.WithLabelValues("NotifyUpdate").Inc()
 }
 
 // NotifyLeave is invoked when a node is detected to have left.
 // The Node argument must not be modified.
 // Implements memberlist.EventDelegate.
 func (d *delegate) NotifyLeave(n *memberlist.Node) {
-	d.invocations.WithLabelValues("NotifyLeave").Inc()
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 	delete(d.data, n.Name)

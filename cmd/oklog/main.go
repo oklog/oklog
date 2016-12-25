@@ -374,6 +374,7 @@ func runIngest(args []string) error {
 	if err != nil {
 		return err
 	}
+	level.Info(logger).Log("cluster", clusterURL.String())
 
 	// Bind listeners.
 	fastListener, err := net.Listen(fastURL.Scheme, fastURL.Host)
@@ -596,6 +597,7 @@ func runStore(args []string) error {
 	if err != nil {
 		return err
 	}
+	level.Info(logger).Log("cluster", clusterURL.String())
 
 	// Bind listeners.
 	apiListener, err := net.Listen(apiURL.Scheme, apiURL.Host)
@@ -861,6 +863,7 @@ func runIngestStore(args []string) error {
 	if err != nil {
 		return err
 	}
+	level.Info(logger).Log("cluster", clusterURL.String())
 
 	// Bind listeners.
 	fastListener, err := net.Listen(fastURL.Scheme, fastURL.Host)
