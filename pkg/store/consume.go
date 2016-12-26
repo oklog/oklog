@@ -13,6 +13,8 @@ import (
 	level "github.com/go-kit/kit/log/experimental_level"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"io"
+
 	"github.com/oklog/prototype/pkg/cluster"
 )
 
@@ -178,7 +180,8 @@ func (c *Consumer) gather() stateFn {
 	}
 
 	// Merge the segment into our active segment.
-	if _, _, _, err := mergeRecords(c.active, readResp.Body); err != nil {
+	var cw countingWriter
+	if _, _, _, err := mergeRecords(c.active, io.TeeReader(readResp.Body, &cw)); err != nil {
 		warn.Log("ingester", instance, "during", "mergeRecords", "err", err)
 		c.gatherErrors++
 		return c.fail // fail everything, same as above
@@ -189,7 +192,7 @@ func (c *Consumer) gather() stateFn {
 
 	// Repeat!
 	c.consumedSegments.Inc()
-	c.consumedBytes.Add(float64(readResp.ContentLength))
+	c.consumedBytes.Add(float64(cw.n))
 	return c.gather
 }
 
@@ -278,4 +281,11 @@ func (c *Consumer) resetVia(commitOrFailed string) stateFn {
 
 	// Back to the beginning.
 	return c.gather
+}
+
+type countingWriter struct{ n int64 }
+
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	cw.n += int64(len(p))
+	return len(p), nil
 }
