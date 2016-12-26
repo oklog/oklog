@@ -220,12 +220,13 @@ func (a *API) handleCommit(w http.ResponseWriter, r *http.Request) {
 			close(notRead)
 			return
 		}
+		sz := s.segment.Size()
 		if err := s.segment.Commit(); err != nil {
 			commitErr <- err
 			return
 		}
 		delete(a.pending, id)
-		commitOK <- s.segment.Size()
+		commitOK <- sz
 	}
 	select {
 	case <-notFound:
