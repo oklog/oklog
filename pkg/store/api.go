@@ -18,19 +18,21 @@ const internalQueryPath = "/_query"
 
 // API serves the store API.
 type API struct {
-	peer           *cluster.Peer
-	log            Log
-	duration       *prometheus.HistogramVec
-	replicateBytes prometheus.Counter
+	peer               *cluster.Peer
+	log                Log
+	replicatedSegments prometheus.Counter
+	replicatedBytes    prometheus.Counter
+	duration           *prometheus.HistogramVec
 }
 
 // NewAPI returns a usable API.
-func NewAPI(peer *cluster.Peer, log Log, duration *prometheus.HistogramVec, replicateBytes prometheus.Counter) *API {
+func NewAPI(peer *cluster.Peer, log Log, replicatedSegments, replicatedBytes prometheus.Counter, duration *prometheus.HistogramVec) *API {
 	return &API{
-		peer:           peer,
-		log:            log,
-		duration:       duration,
-		replicateBytes: replicateBytes,
+		peer:               peer,
+		log:                log,
+		replicatedSegments: replicatedSegments,
+		replicatedBytes:    replicatedBytes,
+		duration:           duration,
 	}
 }
 
@@ -196,7 +198,8 @@ func (a *API) handleReplicate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	a.replicateBytes.Add(float64(n))
+	a.replicatedSegments.Inc()
+	a.replicatedBytes.Add(float64(n))
 	fmt.Fprintln(w, "OK")
 }
 

@@ -32,6 +32,7 @@ type ReadSegment interface {
 	io.Reader
 	Commit() error
 	Failed() error
+	Size() int64
 }
 
 // ErrNoSegmentsAvailable is returned by IngestLog Oldest,

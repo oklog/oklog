@@ -25,6 +25,7 @@ type nopFile struct{}
 
 func (nopFile) Read(p []byte) (int, error)  { return len(p), nil }
 func (nopFile) Write(p []byte) (int, error) { return len(p), nil }
-func (nopFile) Sync() error                 { return nil }
 func (nopFile) Close() error                { return nil }
 func (nopFile) Name() string                { return "" }
+func (nopFile) Size() int64                 { return 0 }
+func (nopFile) Sync() error                 { return nil }

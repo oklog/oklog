@@ -77,6 +77,14 @@ func main() {
 }
 
 func runForward(args []string) error {
+	flagset := flag.NewFlagSet("forward", flag.ExitOnError)
+	var (
+		apiAddr = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for forward API (and metrics)")
+	)
+	if err := flagset.Parse(args); err != nil {
+		return err
+	}
+	args = flagset.Args()
 	if len(args) <= 0 {
 		return errors.New("specify at least one ingest address as an argument")
 	}
@@ -114,9 +122,15 @@ func runForward(args []string) error {
 		disconnects,
 		shortWrites,
 	)
-	// TODO(pb): gotta mount the API somewhere
 
-	// Parse all the addresses into URLs.
+	// For now, just a quick-and-dirty metrics server.
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		http.ListenAndServe(*apiAddr, mux)
+	}()
+
+	// Parse URLs for forwarders.
 	var urls []*url.URL
 	for _, addr := range args {
 		u, err := url.Parse(strings.ToLower(addr))
@@ -315,11 +329,39 @@ func runIngest(args []string) error {
 		Name:      "ingest_writer_flushes_total",
 		Help:      "The number of times an active segment is flushed.",
 	}, []string{"reason"})
-	segmentState := prometheus.NewCounterVec(prometheus.CounterOpts{
+	flushedSegmentAge := prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: "oklog",
-		Name:      "segment_state_transitions",
-		Help:      "Segment state transitions, by next state and reason.",
-	}, []string{"mark", "due_to"})
+		Name:      "ingest_segment_flush_age_seconds",
+		Help:      "Age of segment when flushed in seconds.",
+		Buckets:   prometheus.DefBuckets,
+	})
+	flushedSegmentSize := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "oklog",
+		Name:      "ingest_segment_flush_size_bytes",
+		Help:      "Size of active segment when flushed in bytes.",
+		Buckets:   []float64{1 << 14, 1 << 15, 1 << 16, 1 << 17, 1 << 18, 1 << 19, 1 << 20, 1 << 21, 1 << 22, 1 << 23, 1 << 24},
+	})
+	failedSegments := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "ingest_failed_segments",
+		Help:      "Segments consumed, but failed and returned to flushed.",
+	})
+	committedSegments := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "ingest_committed_segments",
+		Help:      "Segments successfully consumed and committed.",
+	})
+	committedBytes := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "ingest_committed_bytes",
+		Help:      "Bytes successfully consumed and committed.",
+	})
+	//committedSegmentAge := prometheus.NewHistogram(prometheus.HistogramOpts{
+	//	Namespace: "oklog",
+	//	Name:      "ingest_segment_committed_age_second",
+	//	Help:      "Age of segment when committed in seconds.",
+	//	Buckets:   prometheus.DefBuckets,
+	//})
 	apiDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "oklog",
 		Name:      "api_request_duration_seconds",
@@ -332,7 +374,12 @@ func runIngest(args []string) error {
 		ingestWriterRecords,
 		ingestWriterSyncs,
 		ingestWriterRotations,
-		segmentState,
+		flushedSegmentAge,
+		flushedSegmentSize,
+		failedSegments,
+		committedSegments,
+		committedBytes,
+		//committedSegmentAge,
 		apiDuration,
 	)
 
@@ -420,7 +467,8 @@ func runIngest(args []string) error {
 		ingestWriterBytes,
 		ingestWriterRecords,
 		ingestWriterSyncs,
-		ingestWriterRotations,
+		flushedSegmentAge,
+		flushedSegmentSize,
 	)
 	if err != nil {
 		return err
@@ -484,7 +532,15 @@ func runIngest(args []string) error {
 		})
 		g.Add(func() error {
 			mux := http.NewServeMux()
-			mux.Handle("/ingest/", http.StripPrefix("/ingest", ingest.NewAPI(peer, ingestLog, *segmentPendingTimeout, apiDuration, segmentState)))
+			mux.Handle("/ingest/", http.StripPrefix("/ingest", ingest.NewAPI(
+				peer,
+				ingestLog,
+				*segmentPendingTimeout,
+				failedSegments,
+				committedSegments,
+				committedBytes,
+				apiDuration,
+			)))
 			mux.Handle("/metrics", promhttp.Handler())
 			return http.Serve(apiListener, mux)
 		}, func(error) {
@@ -511,6 +567,7 @@ func runStore(args []string) error {
 		segmentTargetSize = flagset.Int64("store.segment-target-size", 100*1024, "try to keep store segments about this size")
 		segmentRetain     = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
 		segmentPurge      = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
+		filesystem        = flagset.String("filesystem", "real", "real, virtual, nop")
 		clusterPeers      = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
@@ -548,31 +605,49 @@ func runStore(args []string) error {
 	}, []string{"method", "path", "status_code"})
 	compactDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "oklog",
-		Name:      "compact_duration_seconds",
+		Name:      "store_compact_duration_seconds",
 		Help:      "Duration of each compaction in seconds.",
 		Buckets:   prometheus.DefBuckets,
 	}, []string{"kind", "compacted", "result"})
-	replicateBytes := prometheus.NewCounter(prometheus.CounterOpts{
+	consumedSegments := prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: "oklog",
-		Name:      "replicate_bytes",
-		Help:      "Bytes replicated to this node.",
+		Name:      "store_consumed_segments",
+		Help:      "Segments consumed from ingest nodes.",
 	})
-	trashSegments := prometheus.NewCounterVec(prometheus.CounterOpts{
+	consumedBytes := prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: "oklog",
-		Name:      "trash_segments",
+		Name:      "store_consumed_bytes",
+		Help:      "Bytes consumed from ingest nodes.",
+	})
+	replicatedSegments := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "store_replicated_segments",
+		Help:      "Segments replicated, by direction i.e. ingress or egress.",
+	}, []string{"direction"})
+	replicatedBytes := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "store_replicated_bytes",
+		Help:      "Segments replicated, by direction i.e. ingress or egress.",
+	}, []string{"direction"})
+	trashedSegments := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "store_trashed_segments",
 		Help:      "Segments moved to trash.",
 	}, []string{"success"})
-	purgeSegments := prometheus.NewCounterVec(prometheus.CounterOpts{
+	purgedSegments := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "oklog",
-		Name:      "purge_segments",
+		Name:      "store_purged_segments",
 		Help:      "Segments purged from trash.",
 	}, []string{"success"})
 	prometheus.MustRegister(
 		apiDuration,
 		compactDuration,
-		replicateBytes,
-		trashSegments,
-		purgeSegments,
+		consumedSegments,
+		consumedBytes,
+		replicatedSegments,
+		replicatedBytes,
+		trashedSegments,
+		purgedSegments,
 	)
 
 	// Parse URLs for listeners.
@@ -610,7 +685,18 @@ func runStore(args []string) error {
 	level.Info(logger).Log("API", apiURL.String())
 
 	// Create storelog.
-	storeLog, err := store.NewFileLog(*storePath, *segmentTargetSize)
+	var fsys fs.Filesystem
+	switch strings.ToLower(*filesystem) {
+	case "real":
+		fsys = fs.NewRealFilesystem()
+	case "virtual":
+		fsys = fs.NewVirtualFilesystem()
+	case "nop":
+		fsys = fs.NewNopFilesystem()
+	default:
+		return errors.Errorf("invalid -filesystem %q", *filesystem)
+	}
+	storeLog, err := store.NewFileLog(fsys, *storePath, *segmentTargetSize)
 	if err != nil {
 		return err
 	}
@@ -648,6 +734,10 @@ func runStore(args []string) error {
 			peer,
 			storeLog,
 			*segmentTargetSize,
+			consumedSegments,
+			consumedBytes,
+			replicatedSegments.WithLabelValues("egress"),
+			replicatedBytes.WithLabelValues("egress"),
 			log.NewContext(logger).With("component", "Consumer"),
 		)
 		g.Add(func() error {
@@ -664,8 +754,8 @@ func runStore(args []string) error {
 			*segmentRetain,
 			*segmentPurge,
 			compactDuration,
-			trashSegments,
-			purgeSegments,
+			trashedSegments,
+			purgedSegments,
 			log.NewContext(logger).With("component", "Compacter"),
 		)
 		g.Add(func() error {
@@ -678,7 +768,13 @@ func runStore(args []string) error {
 	{
 		g.Add(func() error {
 			mux := http.NewServeMux()
-			mux.Handle("/store/", http.StripPrefix("/store", store.NewAPI(peer, storeLog, apiDuration, replicateBytes)))
+			mux.Handle("/store/", http.StripPrefix("/store", store.NewAPI(
+				peer,
+				storeLog,
+				replicatedSegments.WithLabelValues("ingress"),
+				replicatedBytes.WithLabelValues("ingress"),
+				apiDuration,
+			)))
 			mux.Handle("/metrics", promhttp.Handler())
 			return http.Serve(apiListener, mux)
 		}, func(error) {
@@ -777,50 +873,101 @@ func runIngestStore(args []string) error {
 		Name:      "ingest_writer_flushes_total",
 		Help:      "The number of times an active segment is flushed.",
 	}, []string{"reason"})
-	segmentState := prometheus.NewCounterVec(prometheus.CounterOpts{
+	flushedSegmentAge := prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: "oklog",
-		Name:      "segment_state_transitions",
-		Help:      "Segment state transitions, by next state and reason.",
-	}, []string{"mark", "due_to"})
-	replicateBytes := prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "oklog",
-		Name:      "replicate_bytes",
-		Help:      "Bytes replicated to this node.",
+		Name:      "ingest_segment_flush_age_seconds",
+		Help:      "Age of segment when flushed in seconds.",
+		Buckets:   prometheus.DefBuckets,
 	})
+	flushedSegmentSize := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "oklog",
+		Name:      "ingest_segment_flush_size_bytes",
+		Help:      "Size of active segment when flushed in bytes.",
+		Buckets:   []float64{1 << 14, 1 << 15, 1 << 16, 1 << 17, 1 << 18, 1 << 19, 1 << 20, 1 << 21, 1 << 22, 1 << 23, 1 << 24},
+	})
+	failedSegments := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "ingest_failed_segments",
+		Help:      "Segments consumed, but failed and returned to flushed.",
+	})
+	committedSegments := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "ingest_committed_segments",
+		Help:      "Segments successfully consumed and committed.",
+	})
+	committedBytes := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "ingest_committed_bytes",
+		Help:      "Bytes successfully consumed and committed.",
+	})
+	//committedSegmentAge := prometheus.NewHistogram(prometheus.HistogramOpts{
+	//	Namespace: "oklog",
+	//	Name:      "ingest_segment_committed_age_second",
+	//	Help:      "Age of segment when committed in seconds.",
+	//	Buckets:   prometheus.DefBuckets,
+	//})
+	compactDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: "oklog",
+		Name:      "store_compact_duration_seconds",
+		Help:      "Duration of each compaction in seconds.",
+		Buckets:   prometheus.DefBuckets,
+	}, []string{"kind", "compacted", "result"})
+	consumedSegments := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "store_consumed_segments",
+		Help:      "Segments consumed from ingest nodes.",
+	})
+	consumedBytes := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "store_consumed_bytes",
+		Help:      "Bytes consumed from ingest nodes.",
+	})
+	replicatedSegments := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "store_replicated_segments",
+		Help:      "Segments replicated, by direction i.e. ingress or egress.",
+	}, []string{"direction"})
+	replicatedBytes := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "store_replicated_bytes",
+		Help:      "Segments replicated, by direction i.e. ingress or egress.",
+	}, []string{"direction"})
+	trashedSegments := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "store_trashed_segments",
+		Help:      "Segments moved to trash.",
+	}, []string{"success"})
+	purgedSegments := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "store_purged_segments",
+		Help:      "Segments purged from trash.",
+	}, []string{"success"})
 	apiDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "oklog",
 		Name:      "api_request_duration_seconds",
 		Help:      "API request duration in seconds.",
 		Buckets:   prometheus.DefBuckets,
 	}, []string{"method", "path", "status_code"})
-	compactDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
-		Namespace: "oklog",
-		Name:      "compact_duration_seconds",
-		Help:      "Duration of each compaction in seconds.",
-		Buckets:   prometheus.DefBuckets,
-	}, []string{"kind", "compacted", "result"})
-	trashSegments := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "oklog",
-		Name:      "trash_segments",
-		Help:      "Segments moved to trash.",
-	}, []string{"success"})
-	purgeSegments := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "oklog",
-		Name:      "purge_segments",
-		Help:      "Segments purged from trash.",
-	}, []string{"success"})
 	prometheus.MustRegister(
 		connectedClients,
 		ingestWriterBytes,
 		ingestWriterRecords,
 		ingestWriterSyncs,
 		ingestWriterRotations,
-		segmentState,
-		replicateBytes,
-		apiDuration,
+		flushedSegmentAge,
+		flushedSegmentSize,
+		failedSegments,
+		committedSegments,
+		committedBytes,
+		//committedSegmentAge,
 		compactDuration,
-		trashSegments,
-		purgeSegments,
+		consumedSegments,
+		consumedBytes,
+		replicatedSegments,
+		replicatedBytes,
+		trashedSegments,
+		purgedSegments,
+		apiDuration,
 	)
 
 	// Parse URLs for listeners.
@@ -907,7 +1054,8 @@ func runIngestStore(args []string) error {
 		ingestWriterBytes,
 		ingestWriterRecords,
 		ingestWriterSyncs,
-		ingestWriterRotations,
+		flushedSegmentAge,
+		flushedSegmentSize,
 	)
 	if err != nil {
 		return err
@@ -915,7 +1063,7 @@ func runIngestStore(args []string) error {
 	level.Info(logger).Log("ingest_path", *ingestPath)
 
 	// Create storelog.
-	storeLog, err := store.NewFileLog(*storePath, *segmentTargetSize)
+	storeLog, err := store.NewFileLog(fsys, *storePath, *segmentTargetSize)
 	if err != nil {
 		return err
 	}
@@ -982,6 +1130,10 @@ func runIngestStore(args []string) error {
 			peer,
 			storeLog,
 			*segmentTargetSize,
+			consumedSegments,
+			consumedBytes,
+			replicatedSegments.WithLabelValues("egress"),
+			replicatedBytes.WithLabelValues("egress"),
 			log.NewContext(logger).With("component", "Consumer"),
 		)
 		g.Add(func() error {
@@ -998,8 +1150,8 @@ func runIngestStore(args []string) error {
 			*segmentRetain,
 			*segmentPurge,
 			compactDuration,
-			trashSegments,
-			purgeSegments,
+			trashedSegments,
+			purgedSegments,
 			log.NewContext(logger).With("component", "Compacter"),
 		)
 		g.Add(func() error {
@@ -1012,8 +1164,22 @@ func runIngestStore(args []string) error {
 	{
 		g.Add(func() error {
 			mux := http.NewServeMux()
-			mux.Handle("/ingest/", http.StripPrefix("/ingest", ingest.NewAPI(peer, ingestLog, *segmentPendingTimeout, apiDuration, segmentState)))
-			mux.Handle("/store/", http.StripPrefix("/store", store.NewAPI(peer, storeLog, apiDuration, replicateBytes)))
+			mux.Handle("/ingest/", http.StripPrefix("/ingest", ingest.NewAPI(
+				peer,
+				ingestLog,
+				*segmentPendingTimeout,
+				failedSegments,
+				committedSegments,
+				committedBytes,
+				apiDuration,
+			)))
+			mux.Handle("/store/", http.StripPrefix("/store", store.NewAPI(
+				peer,
+				storeLog,
+				replicatedSegments.WithLabelValues("ingress"),
+				replicatedBytes.WithLabelValues("ingress"),
+				apiDuration,
+			)))
 			mux.Handle("/metrics", promhttp.Handler())
 			return http.Serve(apiListener, mux)
 		}, func(error) {

@@ -17,14 +17,16 @@ import (
 
 // API serves the ingest API.
 type API struct {
-	peer         *cluster.Peer
-	log          Log
-	timeout      time.Duration
-	pending      map[string]pendingSegment
-	action       chan func()
-	stop         chan chan struct{}
-	duration     *prometheus.HistogramVec
-	segmentState *prometheus.CounterVec
+	peer              *cluster.Peer
+	log               Log
+	timeout           time.Duration
+	pending           map[string]pendingSegment
+	action            chan func()
+	stop              chan chan struct{}
+	failedSegments    prometheus.Counter
+	committedSegments prometheus.Counter
+	committedBytes    prometheus.Counter
+	duration          *prometheus.HistogramVec
 }
 
 type pendingSegment struct {
@@ -34,16 +36,24 @@ type pendingSegment struct {
 }
 
 // NewAPI returns a usable ingest API.
-func NewAPI(peer *cluster.Peer, log Log, pendingSegmentTimeout time.Duration, duration *prometheus.HistogramVec, segmentState *prometheus.CounterVec) *API {
+func NewAPI(
+	peer *cluster.Peer,
+	log Log,
+	pendingSegmentTimeout time.Duration,
+	failedSegments, committedSegments, committedBytes prometheus.Counter,
+	duration *prometheus.HistogramVec,
+) *API {
 	a := &API{
-		peer:         peer,
-		log:          log,
-		timeout:      pendingSegmentTimeout,
-		pending:      map[string]pendingSegment{},
-		action:       make(chan func()),
-		stop:         make(chan chan struct{}),
-		duration:     duration,
-		segmentState: segmentState,
+		peer:              peer,
+		log:               log,
+		timeout:           pendingSegmentTimeout,
+		pending:           map[string]pendingSegment{},
+		action:            make(chan func()),
+		stop:              make(chan chan struct{}),
+		failedSegments:    failedSegments,
+		committedSegments: committedSegments,
+		committedBytes:    committedBytes,
+		duration:          duration,
 	}
 	go a.loop()
 	return a
@@ -121,11 +131,11 @@ func (a *API) loop() {
 func (a *API) clean(now time.Time) {
 	for id, s := range a.pending {
 		if now.After(s.deadline) {
-			a.segmentState.WithLabelValues("Failed", "timeout").Inc()
 			if err := s.segment.Failed(); err != nil {
 				panic(err)
 			}
 			delete(a.pending, id)
+			a.failedSegments.Inc()
 		}
 	}
 }
@@ -147,7 +157,6 @@ func (a *API) handleNext(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id := uuid.New()
-		a.segmentState.WithLabelValues("Pending", "request").Inc()
 		a.pending[id] = pendingSegment{s, time.Now().Add(a.timeout), false}
 		nextID <- id
 	}
@@ -178,7 +187,6 @@ func (a *API) handleRead(w http.ResponseWriter, r *http.Request) {
 			close(readOpen)
 			return
 		}
-		a.segmentState.WithLabelValues("Reading", "request").Inc()
 		s.reading = true
 		a.pending[id] = s
 		segment <- s.segment
@@ -199,7 +207,7 @@ func (a *API) handleCommit(w http.ResponseWriter, r *http.Request) {
 		notFound  = make(chan struct{})
 		notRead   = make(chan struct{})
 		commitErr = make(chan error)
-		commitOK  = make(chan struct{})
+		commitOK  = make(chan int64)
 	)
 	a.action <- func() {
 		id := r.URL.Query().Get("id")
@@ -212,13 +220,12 @@ func (a *API) handleCommit(w http.ResponseWriter, r *http.Request) {
 			close(notRead)
 			return
 		}
-		a.segmentState.WithLabelValues("Commit", "request").Inc()
 		if err := s.segment.Commit(); err != nil {
 			commitErr <- err
 			return
 		}
 		delete(a.pending, id)
-		close(commitOK)
+		commitOK <- s.segment.Size()
 	}
 	select {
 	case <-notFound:
@@ -227,7 +234,9 @@ func (a *API) handleCommit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "segment hasn't been read yet; can't commit", http.StatusPreconditionRequired)
 	case err := <-commitErr:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-	case <-commitOK:
+	case n := <-commitOK:
+		a.committedSegments.Inc()
+		a.committedBytes.Add(float64(n))
 		fmt.Fprint(w, "Commit OK")
 	}
 }
@@ -246,7 +255,6 @@ func (a *API) handleFailed(w http.ResponseWriter, r *http.Request) {
 			close(notFound)
 			return
 		}
-		a.segmentState.WithLabelValues("Failed", "request").Inc()
 		if err := s.segment.Failed(); err != nil {
 			failedErr <- err
 			return
@@ -260,6 +268,7 @@ func (a *API) handleFailed(w http.ResponseWriter, r *http.Request) {
 	case err := <-failedErr:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	case <-failedOK:
+		a.failedSegments.Inc()
 		fmt.Fprint(w, "Failed OK")
 	}
 }

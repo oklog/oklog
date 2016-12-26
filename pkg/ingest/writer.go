@@ -8,22 +8,23 @@ import (
 
 // NewWriter converts a Log to an io.Writer. Active segments are rotated
 // once sz bytes are written, or every d if the segment is nonempty.
-func NewWriter(log Log, sz int, d time.Duration, bytes, records, syncs prometheus.Counter, rotations *prometheus.CounterVec) (*Writer, error) {
+func NewWriter(log Log, sz int, d time.Duration, bytes, records, syncs prometheus.Counter, age, size prometheus.Histogram) (*Writer, error) {
 	curr, err := log.Create()
 	if err != nil {
 		return nil, err
 	}
 	w := &Writer{
-		log:       log,
-		curr:      curr,
-		cursz:     0,
-		maxsz:     sz,
-		action:    make(chan func()),
-		bytes:     bytes,
-		records:   records,
-		syncs:     syncs,
-		rotations: rotations,
-		stop:      make(chan chan struct{}),
+		log:     log,
+		curr:    curr,
+		cursz:   0,
+		maxsz:   sz,
+		action:  make(chan func()),
+		bytes:   bytes,
+		records: records,
+		syncs:   syncs,
+		age:     age,
+		size:    size,
+		stop:    make(chan chan struct{}),
 	}
 	go w.loop(d)
 	return w, nil
@@ -31,16 +32,18 @@ func NewWriter(log Log, sz int, d time.Duration, bytes, records, syncs prometheu
 
 // Writer implements io.Writer on top of a Log.
 type Writer struct {
-	log       Log
-	curr      WriteSegment
-	cursz     int
-	maxsz     int
-	action    chan func()
-	bytes     prometheus.Counter
-	records   prometheus.Counter
-	syncs     prometheus.Counter
-	rotations *prometheus.CounterVec
-	stop      chan chan struct{}
+	log     Log
+	curr    WriteSegment
+	curts   time.Time // of first write
+	cursz   int
+	maxsz   int
+	action  chan func()
+	bytes   prometheus.Counter
+	records prometheus.Counter
+	syncs   prometheus.Counter
+	age     prometheus.Histogram
+	size    prometheus.Histogram
+	stop    chan chan struct{}
 }
 
 // Write implements io.Writer.
@@ -56,11 +59,13 @@ func (w *Writer) Write(p []byte) (int, error) {
 			c <- res{n, err}
 			return
 		}
+		if w.curts.IsZero() {
+			w.curts = time.Now()
+		}
 		w.bytes.Add(float64(n))
 		w.records.Inc()
 		w.cursz += n
 		if w.cursz >= w.maxsz {
-			w.rotations.WithLabelValues("too_big").Inc()
 			w.closeRotate()
 		}
 		c <- res{n, err}
@@ -107,7 +112,6 @@ func (w *Writer) loop(d time.Duration) {
 			// by only starting the timer once bytes are written and resetting
 			// it with every segment rotation, at the cost of some garbage
 			// generation. Profiling data is necessary.
-			w.rotations.WithLabelValues("too_old").Inc()
 			w.closeRotate()
 
 		case c := <-w.stop:
@@ -129,12 +133,14 @@ func (w *Writer) closeRotate() {
 		if err := w.curr.Close(); err != nil {
 			panic(err)
 		}
+		w.age.Observe(time.Since(w.curts).Seconds())
+		w.size.Observe(float64(w.cursz))
 	}
 	next, err := w.log.Create()
 	if err != nil {
 		panic(err)
 	}
-	w.curr, w.cursz = next, 0
+	w.curr, w.curts, w.cursz = next, time.Time{}, 0
 }
 
 func (w *Writer) closeOnly() {
@@ -150,7 +156,9 @@ func (w *Writer) closeOnly() {
 			if err := w.curr.Close(); err != nil {
 				panic(err)
 			}
+			w.age.Observe(time.Since(w.curts).Seconds())
+			w.size.Observe(float64(w.cursz))
 		}
-		w.curr, w.cursz = nil, 0
+		w.curr, w.curts, w.cursz = nil, time.Time{}, 0
 	}
 }

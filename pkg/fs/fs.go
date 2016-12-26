@@ -25,5 +25,6 @@ type File interface {
 	io.Writer
 	io.Closer
 	Name() string
+	Size() int64
 	Sync() error
 }

@@ -51,3 +51,11 @@ func (realFilesystem) Walk(root string, walkFn filepath.WalkFunc) error {
 }
 
 type realFile struct{ *os.File }
+
+func (f realFile) Size() int64 {
+	fi, err := f.File.Stat()
+	if err != nil {
+		panic(err)
+	}
+	return fi.Size()
+}

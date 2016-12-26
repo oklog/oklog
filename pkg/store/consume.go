@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	level "github.com/go-kit/kit/log/experimental_level"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/oklog/prototype/pkg/cluster"
 )
@@ -19,30 +20,45 @@ import (
 // StoreLog. Consumer is implemented as a state machine: Gather segments,
 // replicate, commit, and repeat. Failures invalidate the batch.
 type Consumer struct {
-	src               *cluster.Peer
-	segmentTargetSize int64
-	gatherErrors      int                 // heuristic to move out of gather state
-	pending           map[string][]string // ingester: segment IDs
-	active            *bytes.Buffer       // merged pending segments
-	activeSince       time.Time           // active segment has been "open" since this time
-	dst               Log
-	stop              chan chan struct{}
-	logger            log.Logger
+	src                *cluster.Peer
+	segmentTargetSize  int64
+	gatherErrors       int                 // heuristic to move out of gather state
+	pending            map[string][]string // ingester: segment IDs
+	active             *bytes.Buffer       // merged pending segments
+	activeSince        time.Time           // active segment has been "open" since this time
+	dst                Log
+	stop               chan chan struct{}
+	consumedSegments   prometheus.Counter
+	consumedBytes      prometheus.Counter
+	replicatedSegments prometheus.Counter
+	replicatedBytes    prometheus.Counter
+	logger             log.Logger
 }
 
 // NewConsumer creates a consumer.
 // Don't forget to Run it.
-func NewConsumer(src *cluster.Peer, dst Log, segmentTargetSize int64, logger log.Logger) *Consumer {
+func NewConsumer(
+	src *cluster.Peer,
+	dst Log,
+	segmentTargetSize int64,
+	consumedSegments, consumedBytes prometheus.Counter,
+	replicatedSegments, replicatedBytes prometheus.Counter,
+	logger log.Logger,
+) *Consumer {
 	return &Consumer{
-		src:               src,
-		segmentTargetSize: segmentTargetSize,
-		gatherErrors:      0,
-		pending:           map[string][]string{},
-		active:            &bytes.Buffer{},
-		activeSince:       time.Time{},
-		dst:               dst,
-		stop:              make(chan chan struct{}),
-		logger:            logger,
+		src:                src,
+		segmentTargetSize:  segmentTargetSize,
+		gatherErrors:       0,
+		pending:            map[string][]string{},
+		active:             &bytes.Buffer{},
+		activeSince:        time.Time{},
+		dst:                dst,
+		stop:               make(chan chan struct{}),
+		consumedSegments:   consumedSegments,
+		consumedBytes:      consumedBytes,
+		replicatedSegments: replicatedSegments,
+		replicatedBytes:    replicatedBytes,
+		logger:             logger,
 	}
 }
 
@@ -76,10 +92,8 @@ type stateFn func() stateFn
 func (c *Consumer) gather() stateFn {
 	var (
 		base = log.NewContext(c.logger).With("state", "gather")
-		//debug = level.Debug(base)
 		warn = level.Warn(base)
 	)
-	//debug.Log("active_since", c.activeSince, "active_records", len(c.active))
 
 	// A naïve way to break out of the gather loop in atypical conditions.
 	// TODO(pb): this obviously needs more thought and consideration
@@ -93,7 +107,6 @@ func (c *Consumer) gather() stateFn {
 		}
 		// We consumed some segment, at least.
 		// Press forward to persistence.
-		//debug.Log("gather_errors", c.gatherErrors, "moving_to", "replicate")
 		return c.replicate
 	}
 	if len(instances) == 0 {
@@ -130,7 +143,6 @@ func (c *Consumer) gather() stateFn {
 	nextRespBodyStr := strings.TrimSpace(string(nextRespBody))
 	if nextResp.StatusCode == http.StatusNotFound {
 		// Normal, when the ingester has no more segments to give right now.
-		//debug.Log("ingester", instance, "segments", "depleted")
 		c.gatherErrors++ // after enough of these errors, we should replicate
 		return c.gather
 	}
@@ -144,7 +156,6 @@ func (c *Consumer) gather() stateFn {
 	// From this point forward, we must either commit or fail the segment.
 	// If we do neither, it will eventually time out, but we should be nice.
 	c.pending[instance] = append(c.pending[instance], nextRespBodyStr)
-	//debug.Log("instance", instance, "mark_pending", nextRespBodyStr)
 
 	// Read the segment.
 	// TODO(pb): use const for "/read" path
@@ -176,19 +187,17 @@ func (c *Consumer) gather() stateFn {
 		c.activeSince = time.Now()
 	}
 
-	//debug.Log("active", c.active.Len())
-
 	// Repeat!
+	c.consumedSegments.Inc()
+	c.consumedBytes.Add(float64(readResp.ContentLength))
 	return c.gather
 }
 
 func (c *Consumer) replicate() stateFn {
 	var (
 		base = log.NewContext(c.logger).With("state", "replicate")
-		//debug = level.Debug(base)
 		warn = level.Warn(base)
 	)
-	//debug.Log()
 
 	// Replicate the segment to the cluster.
 	var (
@@ -197,11 +206,9 @@ func (c *Consumer) replicate() stateFn {
 		indices    = rand.Perm(len(peers))
 		replicated = 0
 	)
-	//debug.Log("peers", fmt.Sprintf("%v", peers), "quorum", quorum, "indices", fmt.Sprintf("%v", indices))
 	for i := 0; i < len(indices) && replicated < quorum; i++ {
 		index := indices[i]
 		target := peers[index]
-		//debug.Log("replicate_attempt", i+1, "target", target)
 		// TODO(pb): use const for "/read" path
 		// TODO(pb): use non-default HTTP client
 		// TODO(pb): checksum
@@ -216,7 +223,6 @@ func (c *Consumer) replicate() stateFn {
 			continue // we'll try another one
 		}
 		replicated++
-		//debug.Log("target", target, "during", "POST /store/replicate", "got", resp.Status, "replicated", replicated, "quorum", quorum)
 	}
 	if replicated < quorum {
 		warn.Log("err", "failed to achieve quorum replication", "want", quorum, "have", replicated)
@@ -224,6 +230,8 @@ func (c *Consumer) replicate() stateFn {
 	}
 
 	// All good!
+	c.replicatedSegments.Inc()
+	c.replicatedBytes.Add(float64(c.active.Len()))
 	return c.commit
 }
 
@@ -238,10 +246,8 @@ func (c *Consumer) fail() stateFn {
 func (c *Consumer) resetVia(commitOrFailed string) stateFn {
 	var (
 		base = log.NewContext(c.logger).With("state", commitOrFailed)
-		//debug = level.Debug(base)
 		warn = level.Warn(base)
 	)
-	//debug.Log()
 
 	// If commits fail, the segment may be re-replicated; that's OK.
 	// If fails fail, the segment will eventually time-out; that's also OK.

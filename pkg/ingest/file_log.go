@@ -172,6 +172,10 @@ func (r fileReadSegment) Failed() error {
 	return r.fs.Rename(oldname, newname)
 }
 
+func (r fileReadSegment) Size() int64 {
+	return r.f.Size()
+}
+
 func modifyExtension(filename, newExt string) string {
 	return filename[:len(filename)-len(filepath.Ext(filename))] + newExt
 }
