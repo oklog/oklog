@@ -1280,17 +1280,41 @@ func runTestService(args []string) error {
 	flagset := flag.NewFlagSet("testsvc", flag.ExitOnError)
 	var (
 		id   = flagset.String("id", "foo", "ID for this instance")
+		size = flagset.Int("size", 512, "bytes per record")
 		rate = flagset.Int("rate", 5, "records per second")
 	)
 	if err := flagset.Parse(args); err != nil {
 		return err
 	}
 
+	// Populate a set of records.
+	fmt.Fprintf(os.Stderr, "reticulating splines...\n")
+	rand.Seed(time.Now().UnixNano())
+	var (
+		tslen = len(fmt.Sprintf("%s", time.Now().Format(time.RFC3339)))
+		idlen = len(*id)
+		ctlen = 9                                 // %09d
+		presz = tslen + 1 + idlen + 1 + ctlen + 1 // "2016-01-01T12:34:56+01:00 foo 000000001 "
+		recsz = *size - presz - 1                 // <prefix> <record> <\n>
+	)
+	if recsz <= 0 {
+		return errors.Errorf("with -id %q, minimum -size is %d", *id, presz+1+1)
+	}
+	const charset = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+	records := make([]string, 1000)
+	for i := 0; i < len(records); i++ {
+		record := make([]rune, recsz)
+		for j := 0; j < recsz; j++ {
+			record[j] = rune(charset[rand.Intn(len(charset))])
+		}
+		records[i] = string(record)
+	}
+
+	// Prepare some statistics.
 	var (
 		nBytes   uint64
 		nRecords uint64
 	)
-
 	printRate := func(d time.Duration, printEvery int) {
 		var prevBytes, prevRecords, iterationCount uint64
 		for range time.Tick(d) {
@@ -1310,21 +1334,20 @@ func runTestService(args []string) error {
 		}
 	}
 	go printRate(1*time.Second, 10)
-	go printRate(10*time.Second, 1)
+	//go printRate(10*time.Second, 1)
 
-	fmt.Fprintf(os.Stderr, "%s starting, %d records per second\n", *id, *rate)
-
-	rand.Seed(time.Now().UnixNano())
-	var count uint64
+	// Emit.
+	fmt.Fprintf(os.Stderr, "%s starting, %d bytes per record, %d records per second\n", *id, *size, *rate)
 	hz := float64(time.Second) / float64(*rate)
+	var count int
 	for range time.Tick(time.Duration(hz)) {
 		count++
 		if n, err := fmt.Fprintf(os.Stdout,
-			"%s %s %d %s\n",
+			"%s %s %09d %s\n",
 			time.Now().Format(time.RFC3339),
 			*id,
 			count,
-			testServiceRecords[rand.Intn(len(testServiceRecords))],
+			records[count%len(records)],
 		); err != nil {
 			fmt.Fprintf(os.Stderr, "%d: %v\n", count, err)
 		} else {
