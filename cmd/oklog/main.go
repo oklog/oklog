@@ -1396,6 +1396,7 @@ func runTestService(args []string) error {
 		*id, *size, *rate, recordsPerCycle, timePerCycle,
 	)
 	for range time.Tick(timePerCycle) {
+		var bytes int
 		for i := 0; i < recordsPerCycle; i++ {
 			count++
 			if n, err := fmt.Fprintf(os.Stdout,
@@ -1407,10 +1408,11 @@ func runTestService(args []string) error {
 			); err != nil {
 				fmt.Fprintf(os.Stderr, "%d: %v\n", count, err)
 			} else {
-				atomic.AddUint64(&nBytes, uint64(n))
-				atomic.AddUint64(&nRecords, 1)
+				bytes += n
 			}
 		}
+		atomic.AddUint64(&nBytes, uint64(bytes))
+		atomic.AddUint64(&nRecords, uint64(recordsPerCycle))
 	}
 	return nil
 }
