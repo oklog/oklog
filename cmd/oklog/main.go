@@ -1384,9 +1384,9 @@ func runTestService(args []string) error {
 		recordsPerCycle = 1
 		timePerCycle    = time.Duration(float64(time.Second) / float64(*rate))
 	)
-	for timePerCycle < 5*time.Millisecond {
-		recordsPerCycle *= 10
-		timePerCycle *= 10
+	for timePerCycle < 50*time.Millisecond {
+		recordsPerCycle *= 2
+		timePerCycle *= 2
 	}
 
 	// Emit!
