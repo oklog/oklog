@@ -1377,22 +1377,39 @@ func runTestService(args []string) error {
 	//go printRate(10*time.Second, 1)
 
 	// Emit.
-	fmt.Fprintf(os.Stderr, "%s starting, %d bytes per record, %d records per second\n", *id, *size, *rate)
-	hz := float64(time.Second) / float64(*rate)
+
+	// Calculate cycle parameters.
+	// If cycles are too short, we never meet our rate target.
+	var (
+		recordsPerCycle = 1
+		timePerCycle    = time.Duration(float64(time.Second) / float64(*rate))
+	)
+	for timePerCycle < 5*time.Millisecond {
+		recordsPerCycle *= 10
+		timePerCycle *= 10
+	}
+
+	// Emit!
 	var count int
-	for range time.Tick(time.Duration(hz)) {
-		count++
-		if n, err := fmt.Fprintf(os.Stdout,
-			"%s %s %09d %s\n",
-			time.Now().Format(time.RFC3339),
-			*id,
-			count,
-			records[count%len(records)],
-		); err != nil {
-			fmt.Fprintf(os.Stderr, "%d: %v\n", count, err)
-		} else {
-			atomic.AddUint64(&nBytes, uint64(n))
-			atomic.AddUint64(&nRecords, 1)
+	fmt.Fprintf(os.Stderr,
+		"%s starting, %d bytes/record, %d records/sec; %d records/cycle, %s/cycle\n",
+		*id, *size, *rate, recordsPerCycle, timePerCycle,
+	)
+	for range time.Tick(timePerCycle) {
+		for i := 0; i < recordsPerCycle; i++ {
+			count++
+			if n, err := fmt.Fprintf(os.Stdout,
+				"%s %s %09d %s\n",
+				time.Now().Format(time.RFC3339),
+				*id,
+				count,
+				records[count%len(records)],
+			); err != nil {
+				fmt.Fprintf(os.Stderr, "%d: %v\n", count, err)
+			} else {
+				atomic.AddUint64(&nBytes, uint64(n))
+				atomic.AddUint64(&nRecords, 1)
+			}
 		}
 	}
 	return nil
