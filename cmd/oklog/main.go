@@ -30,7 +30,6 @@ import (
 	"github.com/oklog/prototype/pkg/group"
 	"github.com/oklog/prototype/pkg/ingest"
 	"github.com/oklog/prototype/pkg/store"
-	"github.com/oklog/ulid"
 )
 
 func usage() {
@@ -1141,20 +1140,18 @@ func runIngestStore(args []string) error {
 		})
 	}
 	{
-		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
-		idGen := func() string { return ulid.MustNew(ulid.Now(), entropy).String() } // TODO(pb): could improve efficiency
 		g.Add(func() error {
-			return ingest.HandleConnections(fastListener, ingestWriter, ingest.HandleFastWriter, idGen, connectedClients.WithLabelValues("fast"))
+			return ingest.HandleConnections(fastListener, ingestWriter, ingest.HandleFastWriter, connectedClients.WithLabelValues("fast"))
 		}, func(error) {
 			fastListener.Close()
 		})
 		g.Add(func() error {
-			return ingest.HandleConnections(durableListener, ingestWriter, ingest.HandleDurableWriter, idGen, connectedClients.WithLabelValues("durable"))
+			return ingest.HandleConnections(durableListener, ingestWriter, ingest.HandleDurableWriter, connectedClients.WithLabelValues("durable"))
 		}, func(error) {
 			durableListener.Close()
 		})
 		g.Add(func() error {
-			return ingest.HandleConnections(bulkListener, ingestWriter, ingest.HandleBulkWriter, idGen, connectedClients.WithLabelValues("bulk"))
+			return ingest.HandleConnections(bulkListener, ingestWriter, ingest.HandleBulkWriter, connectedClients.WithLabelValues("bulk"))
 		}, func(error) {
 			bulkListener.Close()
 		})
