@@ -28,7 +28,7 @@ func mergeRecords(w io.Writer, readers ...io.Reader) (low, high ulid.ULID, n int
 	advance := func(i int) error {
 		if ok[i] = scanner[i].Scan(); ok[i] {
 			record[i] = scanner[i].Text()
-			id[i] = strings.Fields(record[i])[0]
+			id[i] = strings.Fields(record[i])[0] // TODO(pb): profiling reveals this to be $expensive$
 		} else if err := scanner[i].Err(); err != nil && err != io.EOF {
 			return err
 		}
