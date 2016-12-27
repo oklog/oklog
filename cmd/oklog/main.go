@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"net/url"
 	"os"
 	"os/signal"
@@ -124,10 +125,22 @@ func runForward(args []string) error {
 	)
 
 	// For now, just a quick-and-dirty metrics server.
+	apiURL, err := url.Parse(*apiAddr)
+	if err != nil {
+		return err
+	}
+	apiListener, err := net.Listen(apiURL.Scheme, apiURL.Host)
+	if err != nil {
+		return err
+	}
 	go func() {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
-		http.ListenAndServe(*apiAddr, mux)
+		mux.Handle("/debug/goroutine", pprof.Handler("goroutine"))
+		mux.Handle("/debug/heap", pprof.Handler("heap"))
+		mux.Handle("/debug/threadcreate", pprof.Handler("threadcreate"))
+		mux.Handle("/debug/block", pprof.Handler("block"))
+		panic(http.Serve(apiListener, mux))
 	}()
 
 	// Parse URLs for forwarders.
@@ -541,6 +554,10 @@ func runIngest(args []string) error {
 				committedBytes,
 				apiDuration,
 			)))
+			mux.Handle("/debug/goroutine", pprof.Handler("goroutine"))
+			mux.Handle("/debug/heap", pprof.Handler("heap"))
+			mux.Handle("/debug/threadcreate", pprof.Handler("threadcreate"))
+			mux.Handle("/debug/block", pprof.Handler("block"))
 			mux.Handle("/metrics", promhttp.Handler())
 			return http.Serve(apiListener, mux)
 		}, func(error) {
@@ -776,6 +793,10 @@ func runStore(args []string) error {
 				apiDuration,
 			)))
 			mux.Handle("/metrics", promhttp.Handler())
+			mux.Handle("/debug/goroutine", pprof.Handler("goroutine"))
+			mux.Handle("/debug/heap", pprof.Handler("heap"))
+			mux.Handle("/debug/threadcreate", pprof.Handler("threadcreate"))
+			mux.Handle("/debug/block", pprof.Handler("block"))
 			return http.Serve(apiListener, mux)
 		}, func(error) {
 			apiListener.Close()
@@ -1181,6 +1202,10 @@ func runIngestStore(args []string) error {
 				apiDuration,
 			)))
 			mux.Handle("/metrics", promhttp.Handler())
+			mux.Handle("/debug/goroutine", pprof.Handler("goroutine"))
+			mux.Handle("/debug/heap", pprof.Handler("heap"))
+			mux.Handle("/debug/threadcreate", pprof.Handler("threadcreate"))
+			mux.Handle("/debug/block", pprof.Handler("block"))
 			return http.Serve(apiListener, mux)
 		}, func(error) {
 			apiListener.Close()
