@@ -130,7 +130,7 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 	advance := func(i int) error {
 		if ok[i] = scanner[i].Scan(); ok[i] {
 			record[i] = scanner[i].Text()
-			id[i] = strings.Fields(record[i])[0]
+			id[i] = strings.Fields(record[i])[0] // TODO(pb): profiling reveals this to be $expensive$
 		} else if err := scanner[i].Err(); err != nil && err != io.EOF {
 			return err
 		}
