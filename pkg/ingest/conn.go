@@ -4,19 +4,26 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/oklog/ulid"
 )
 
 // HandleConnections passes each connection from the listener to the connection handler.
 // Terminate the function by closing the listener.
-func HandleConnections(ln net.Listener, w *Writer, h ConnectionHandler, idGen IDGenerator, connectedClients prometheus.Gauge) error {
+func HandleConnections(ln net.Listener, w *Writer, h ConnectionHandler, connectedClients prometheus.Gauge) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			return err
 		}
+		// rand.New is not goroutine safe, need 1 per connection!
+		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
+		idGen := func() string { return ulid.MustNew(ulid.Now(), entropy).String() } // TODO(pb): could improve efficiency
 		go h(conn, w, idGen, connectedClients)
 	}
 }
