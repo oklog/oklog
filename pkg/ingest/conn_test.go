@@ -1,0 +1,114 @@
+package ingest
+
+import (
+	"bufio"
+	"fmt"
+	"net"
+	"path/filepath"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/oklog/prototype/pkg/fs"
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+func TestHandleConnectionsCleanup(t *testing.T) {
+	// Bind a listener on some port.
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up a file log using our mock FS.
+	// The mock FS counts file closures.
+	fs := &mockFilesystem{}
+	log, err := NewFileLog(fs, "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Listen for connections.
+	// When shut down, send the error on the chan.
+	errc := make(chan error, 1)
+	go func() { errc <- HandleConnections(ln, echo(t), log, time.Second, 1024, nil, nil, nil, nil, nil, nil) }()
+
+	// Connect to the handler.
+	var conn net.Conn
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	if !within(time.Second, func() bool {
+		conn, err = net.Dial("tcp", "127.0.0.1:"+port)
+		return err == nil
+	}) {
+		t.Fatal("listener never came up")
+	}
+
+	// Write something to make sure the connection is good.
+	if _, err := fmt.Fprintln(conn, "hello world"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make sure closing the listener triggers the segment to flush.
+	pre := atomic.LoadUint64(&fs.closures)
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-errc:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for shutdown")
+	}
+	if post := atomic.LoadUint64(&fs.closures); post-pre != 1 {
+		t.Errorf("pre=%d, post=%d", pre, post)
+	}
+
+	// Make sure we can't write to the conn at some point.
+	if !within(time.Second, func() bool {
+		_, err := fmt.Fprintln(conn, "this should fail, eventually")
+		return err != nil
+	}) {
+		t.Errorf("our connection never noticed the shutdown")
+	}
+}
+
+func echo(t *testing.T) ConnectionHandler {
+	return func(conn net.Conn, w *Writer, _ IDGenerator, _ prometheus.Gauge) error {
+		s := bufio.NewScanner(conn)
+		for s.Scan() {
+			t.Logf("RECV> %s", s.Text())
+			fmt.Fprintln(w, s.Text())
+		}
+		return s.Err()
+	}
+}
+
+func within(d time.Duration, f func() bool) bool {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if f() {
+			return true
+		}
+		time.Sleep(d / 25)
+	}
+	return false
+}
+
+type mockFilesystem struct{ closures uint64 }
+
+func (fs *mockFilesystem) Create(path string) (fs.File, error)               { return &mockFile{&fs.closures}, nil }
+func (fs *mockFilesystem) Open(path string) (fs.File, error)                 { return &mockFile{&fs.closures}, nil }
+func (fs *mockFilesystem) Remove(path string) error                          { return nil }
+func (fs *mockFilesystem) Rename(oldname, newname string) error              { return nil }
+func (fs *mockFilesystem) Exists(path string) bool                           { return false }
+func (fs *mockFilesystem) MkdirAll(path string) error                        { return nil }
+func (fs *mockFilesystem) Chtimes(path string, atime, mtime time.Time) error { return nil }
+func (fs *mockFilesystem) Walk(root string, walkFn filepath.WalkFunc) error  { return nil }
+
+type mockFile struct{ closures *uint64 }
+
+func (f *mockFile) Read(p []byte) (int, error)  { return len(p), nil }
+func (f *mockFile) Write(p []byte) (int, error) { return len(p), nil }
+func (f *mockFile) Close() error                { atomic.AddUint64(f.closures, 1); return nil }
+func (f *mockFile) Name() string                { return "" }
+func (f *mockFile) Size() int64                 { return 0 }
+func (f *mockFile) Sync() error                 { return nil }

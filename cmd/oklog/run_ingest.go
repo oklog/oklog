@@ -47,18 +47,18 @@ func runIngest(args []string) error {
 		return err
 	}
 
-	// +-1----------------+   +-3----------+   +-2------+   +-1---------+ +-1----+
-	// | Fast listener    |<--| Write      |-->| Writer |-->| IngestLog | | Peer |
-	// +------------------+   | handler    |   +--------+   +-----------+ +------+
-	// +-1----------------+   |            |                  ^             ^
-	// | Durable listener |<--|            |                  |             |
-	// +------------------+   |            |                  |             |
-	// +-1----------------+   |            |                  |             |
-	// | Bulk listener    |<--|            |                  |             |
-	// +------------------+   +------------+                  |             |
-	// +-1----------------+   +-2----------+                  |             |
-	// | API listener     |<--| Ingest API |------------------'             |
-	// |                  |   |            |--------------------------------'
+	// +-1----------------+   +-2----------+   +-1----------+ +-1----+
+	// | Fast listener    |<--| Write      |-->| ingest.Log | | Peer |
+	// +------------------+   | handler    |   +------------+ +------+
+	// +-1----------------+   |            |     ^              ^
+	// | Durable listener |<--|            |     |              |
+	// +------------------+   |            |     |              |
+	// +-1----------------+   |            |     |              |
+	// | Bulk listener    |<--|            |     |              |
+	// +------------------+   +------------+     |              |
+	// +-1----------------+   +-2----------+     |              |
+	// | API listener     |<--| Ingest API |-----'              |
+	// |                  |   |            |--------------------'
 	// +------------------+   +------------+
 
 	// Logging.
@@ -120,12 +120,6 @@ func runIngest(args []string) error {
 		Name:      "ingest_committed_bytes",
 		Help:      "Bytes successfully consumed and committed.",
 	})
-	//committedSegmentAge := prometheus.NewHistogram(prometheus.HistogramOpts{
-	//	Namespace: "oklog",
-	//	Name:      "ingest_segment_committed_age_second",
-	//	Help:      "Age of segment when committed in seconds.",
-	//	Buckets:   prometheus.DefBuckets,
-	//})
 	apiDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "oklog",
 		Name:      "api_request_duration_seconds",
@@ -143,7 +137,6 @@ func runIngest(args []string) error {
 		failedSegments,
 		committedSegments,
 		committedBytes,
-		//committedSegmentAge,
 		apiDuration,
 	)
 
@@ -228,16 +221,6 @@ func runIngest(args []string) error {
 
 	// Execution group.
 	var g group.Group
-	{
-		//cancel := make(chan struct{})
-		//g.Add(func() error {
-		//	<-cancel
-		//	ingestWriter.Stop()
-		//	return nil
-		//}, func(error) {
-		//	close(cancel)
-		//})
-	}
 	{
 		cancel := make(chan struct{})
 		g.Add(func() error {

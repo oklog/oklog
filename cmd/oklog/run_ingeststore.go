@@ -46,29 +46,29 @@ func runIngestStore(args []string) error {
 		return err
 	}
 
-	// +-1----------------+   +-3----------+   +-2------+   +-1---------+  +-1--------+  +-1-----+
-	// | Fast listener    |<--| Write      |-->| Writer |-->| IngestLog |  | StoreLog |  | Peer  |
-	// +------------------+   | handler    |   +--------+   +-----------+  +----------+  +-------+
-	// +-1----------------+   |            |                      ^           ^ ^ ^        ^ ^ ^
-	// | Durable listener |<--|            |                      |           | | |        | | |
-	// +------------------+   |            |                      |           | | |        | | |
-	// +-1----------------+   |            |                      |           | | |        | | |
-	// | Bulk listener    |<--|            |                      |           | | |        | | |
-	// +------------------+   +------------+                      |           | | |        | | |
-	// +-1----------------+   +-2----------+                      |           | | |        | | |
-	// | API listener     |<--| Ingest API |----------------------'           | | |        | | |
-	// |                  |   |            |-----------------------------------------------' | |
-	// |                  |   +------------+                                  | | |          | |
-	// |                  |   +-2----------+                                  | | |          | |
-	// |                  |<--| Store API  |----------------------------------' | |          | |
-	// |                  |   |            |-------------------------------------------------' |
-	// +------------------+   +------------+                                    | |            |
-	//                        +-2----------+                                    | |            |
-	//                        | Compacter  |------------------------------------' |            |
-	//                        +------------+                                      |            |
-	//                        +-2----------+                                      |            |
-	//                        | Consumer   |--------------------------------------'            |
-	//                        |            |---------------------------------------------------'
+	// +-1----------------+   +-2----------+   +-1----------+  +-1---------+  +-1-----+
+	// | Fast listener    |<--| Write      |-->| ingest.Log |  | store.Log |  | Peer  |
+	// +------------------+   | handler    |   +------------+  +-----------+  +-------+
+	// +-1----------------+   |            |         ^            ^ ^ ^         ^ ^ ^
+	// | Durable listener |<--|            |         |            | | |         | | |
+	// +------------------+   |            |         |            | | |         | | |
+	// +-1----------------+   |            |         |            | | |         | | |
+	// | Bulk listener    |<--|            |         |            | | |         | | |
+	// +------------------+   +------------+         |            | | |         | | |
+	// +-1----------------+   +-2----------+         |            | | |         | | |
+	// | API listener     |<--| Ingest API |---------'            | | |         | | |
+	// |                  |   |            |------------------------------------' | |
+	// |                  |   +------------+                      | | |           | |
+	// |                  |   +-2----------+                      | | |           | |
+	// |                  |<--| Store API  |----------------------' | |           | |
+	// |                  |   |            |--------------------------------------' |
+	// +------------------+   +------------+                        | |             |
+	//                        +-2----------+                        | |             |
+	//                        | Compacter  |------------------------' |             |
+	//                        +------------+                          |             |
+	//                        +-2----------+                          |             |
+	//                        | Consumer   |--------------------------'             |
+	//                        |            |----------------------------------------'
 	//                        +------------+
 
 	// Logging.
@@ -130,12 +130,6 @@ func runIngestStore(args []string) error {
 		Name:      "ingest_committed_bytes",
 		Help:      "Bytes successfully consumed and committed.",
 	})
-	//committedSegmentAge := prometheus.NewHistogram(prometheus.HistogramOpts{
-	//	Namespace: "oklog",
-	//	Name:      "ingest_segment_committed_age_second",
-	//	Help:      "Age of segment when committed in seconds.",
-	//	Buckets:   prometheus.DefBuckets,
-	//})
 	compactDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: "oklog",
 		Name:      "store_compact_duration_seconds",
@@ -189,7 +183,6 @@ func runIngestStore(args []string) error {
 		failedSegments,
 		committedSegments,
 		committedBytes,
-		//committedSegmentAge,
 		compactDuration,
 		consumedSegments,
 		consumedBytes,
@@ -288,16 +281,6 @@ func runIngestStore(args []string) error {
 
 	// Execution group.
 	var g group.Group
-	{
-		//cancel := make(chan struct{})
-		//g.Add(func() error {
-		//	<-cancel
-		//	ingestWriter.Stop()
-		//	return nil
-		//}, func(error) {
-		//	close(cancel)
-		//})
-	}
 	{
 		cancel := make(chan struct{})
 		g.Add(func() error {
