@@ -10,21 +10,55 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"sync"
+
 	"github.com/oklog/ulid"
 )
 
 // HandleConnections passes each connection from the listener to the connection handler.
 // Terminate the function by closing the listener.
-func HandleConnections(ln net.Listener, w *Writer, h ConnectionHandler, connectedClients prometheus.Gauge) error {
+func HandleConnections(
+	ln net.Listener,
+	h ConnectionHandler,
+	log Log,
+	segmentFlushAge time.Duration,
+	segmentFlushSize int,
+	connectedClients prometheus.Gauge,
+	bytes, records, syncs prometheus.Counter,
+	segmentAge, segmentSize prometheus.Histogram,
+) error {
+	// We shouldn't return until all connections are terminated.
+	m := newConnectionManager()
+	defer m.shutdown()
+
 	for {
+		// Accept a connection.
 		conn, err := ln.Accept()
 		if err != nil {
 			return err
 		}
-		// rand.New is not goroutine safe, need 1 per connection!
+
+		// Create a new writer for this connection.
+		// It's important that it be closed.
+		w, err := NewWriter(log, segmentFlushAge, segmentFlushSize, bytes, records, syncs, segmentAge, segmentSize)
+		if err != nil {
+			return err
+		}
+
+		// Create a new entropy source and ID generator for this connection.
+		// rand.New is not goroutine safe!
 		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
-		idGen := func() string { return ulid.MustNew(ulid.Now(), entropy).String() } // TODO(pb): could improve efficiency
-		go h(conn, w, idGen, connectedClients)
+		idGen := func() string { return ulid.MustNew(ulid.Now(), entropy).String() }
+
+		// Register the connection in the manager, and launch the handler.
+		// The handler may exit from the client, or via manager shutdown.
+		// In either case, the writer is closed.
+		m.register(conn)
+		go func() {
+			h(conn, w, idGen, connectedClients)
+			w.closeOnly() // make sure it's flushed
+			m.remove(conn)
+		}()
 	}
 }
 
@@ -72,5 +106,51 @@ func HandleBulkWriter(conn net.Conn, w *Writer, idGen IDGenerator, connectedClie
 	return errors.New("TODO(pb): not implemented")
 }
 
-// IDGenerator should return unique record identifiers, e.g. ULIDs.
+// IDGenerator should return unique record identifiers, i.e. ULIDs.
 type IDGenerator func() string
+
+func newConnectionManager() *connectionManager {
+	return &connectionManager{
+		active: map[string]net.Conn{},
+	}
+}
+
+type connectionManager struct {
+	mtx    sync.RWMutex
+	active map[string]net.Conn
+}
+
+func (m *connectionManager) register(conn net.Conn) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	m.active[conn.RemoteAddr().String()] = conn
+}
+
+func (m *connectionManager) remove(conn net.Conn) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	delete(m.active, conn.RemoteAddr().String())
+}
+
+func (m *connectionManager) shutdown() {
+	m.closeAllConnections()
+	for range time.Tick(50 * time.Millisecond) {
+		if m.isEmpty() {
+			return
+		}
+	}
+}
+
+func (m *connectionManager) closeAllConnections() {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+	for _, conn := range m.active {
+		conn.Close()
+	}
+}
+
+func (m *connectionManager) isEmpty() bool {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+	return len(m.active) <= 0
+}

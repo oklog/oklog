@@ -8,7 +8,13 @@ import (
 
 // NewWriter converts a Log to an io.Writer. Active segments are rotated
 // once sz bytes are written, or every d if the segment is nonempty.
-func NewWriter(log Log, sz int, d time.Duration, bytes, records, syncs prometheus.Counter, age, size prometheus.Histogram) (*Writer, error) {
+func NewWriter(
+	log Log,
+	d time.Duration,
+	sz int,
+	bytes, records, syncs prometheus.Counter,
+	age, size prometheus.Histogram,
+) (*Writer, error) {
 	curr, err := log.Create()
 	if err != nil {
 		return nil, err

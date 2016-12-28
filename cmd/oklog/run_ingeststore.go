@@ -245,7 +245,7 @@ func runIngestStore(args []string) error {
 	}
 	level.Info(logger).Log("API", fmt.Sprintf("%s://%s", apiNetwork, apiAddress))
 
-	// Create ingestlog and its writer.
+	// Create ingestlog.
 	var fsys fs.Filesystem
 	switch strings.ToLower(*filesystem) {
 	case "real":
@@ -258,19 +258,6 @@ func runIngestStore(args []string) error {
 		return errors.Errorf("invalid -filesystem %q", *filesystem)
 	}
 	ingestLog, err := ingest.NewFileLog(fsys, *ingestPath)
-	if err != nil {
-		return err
-	}
-	ingestWriter, err := ingest.NewWriter(
-		ingestLog,
-		*segmentFlushSize,
-		*segmentFlushAge,
-		ingestWriterBytes,
-		ingestWriterRecords,
-		ingestWriterSyncs,
-		flushedSegmentAge,
-		flushedSegmentSize,
-	)
 	if err != nil {
 		return err
 	}
@@ -302,14 +289,14 @@ func runIngestStore(args []string) error {
 	// Execution group.
 	var g group.Group
 	{
-		cancel := make(chan struct{})
-		g.Add(func() error {
-			<-cancel
-			ingestWriter.Stop()
-			return nil
-		}, func(error) {
-			close(cancel)
-		})
+		//cancel := make(chan struct{})
+		//g.Add(func() error {
+		//	<-cancel
+		//	ingestWriter.Stop()
+		//	return nil
+		//}, func(error) {
+		//	close(cancel)
+		//})
 	}
 	{
 		cancel := make(chan struct{})
@@ -322,17 +309,41 @@ func runIngestStore(args []string) error {
 	}
 	{
 		g.Add(func() error {
-			return ingest.HandleConnections(fastListener, ingestWriter, ingest.HandleFastWriter, connectedClients.WithLabelValues("fast"))
+			return ingest.HandleConnections(
+				fastListener,
+				ingest.HandleFastWriter,
+				ingestLog,
+				*segmentFlushAge, *segmentFlushSize,
+				connectedClients.WithLabelValues("fast"),
+				ingestWriterBytes, ingestWriterRecords, ingestWriterSyncs,
+				flushedSegmentAge, flushedSegmentSize,
+			)
 		}, func(error) {
 			fastListener.Close()
 		})
 		g.Add(func() error {
-			return ingest.HandleConnections(durableListener, ingestWriter, ingest.HandleDurableWriter, connectedClients.WithLabelValues("durable"))
+			return ingest.HandleConnections(
+				durableListener,
+				ingest.HandleDurableWriter,
+				ingestLog,
+				*segmentFlushAge, *segmentFlushSize,
+				connectedClients.WithLabelValues("durable"),
+				ingestWriterBytes, ingestWriterRecords, ingestWriterSyncs,
+				flushedSegmentAge, flushedSegmentSize,
+			)
 		}, func(error) {
 			durableListener.Close()
 		})
 		g.Add(func() error {
-			return ingest.HandleConnections(bulkListener, ingestWriter, ingest.HandleBulkWriter, connectedClients.WithLabelValues("bulk"))
+			return ingest.HandleConnections(
+				bulkListener,
+				ingest.HandleBulkWriter,
+				ingestLog,
+				*segmentFlushAge, *segmentFlushSize,
+				connectedClients.WithLabelValues("bulk"),
+				ingestWriterBytes, ingestWriterRecords, ingestWriterSyncs,
+				flushedSegmentAge, flushedSegmentSize,
+			)
 		}, func(error) {
 			bulkListener.Close()
 		})
