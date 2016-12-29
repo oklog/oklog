@@ -282,7 +282,7 @@ func (c *Consumer) resetVia(commitOrFailed string) stateFn {
 				}
 				resp.Body.Close()
 				if resp.StatusCode != http.StatusOK {
-					warn.Log("instance", instance, "during", "POST", "status", resp.Status)
+					warn.Log("instance", instance, "during", "POST", "uri", uri, "status", resp.Status)
 					return
 				}
 			}(id)
