@@ -14,6 +14,14 @@ import (
 	"github.com/oklog/prototype/pkg/cluster"
 )
 
+// These are the store API URL paths.
+const (
+	APIPathUserQuery     = "/query"
+	APIPathInternalQuery = "/_query"
+	APIPathReplicate     = "/replicate"
+	APIPathClusterState  = "/_clusterstate"
+)
+
 const internalQueryPath = "/_query"
 
 // API serves the store API.
@@ -50,19 +58,19 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	method, path := r.Method, r.URL.Path
 	switch {
 	case method == "GET" && path == "/":
-		r.URL.Path = "/query"
+		r.URL.Path = APIPathUserQuery
 		http.Redirect(w, r, r.URL.String(), http.StatusTemporaryRedirect)
-	case method == "GET" && path == "/query":
+	case method == "GET" && path == APIPathUserQuery:
 		a.handleUserQuery(w, r, false)
-	case method == "HEAD" && path == "/query":
+	case method == "HEAD" && path == APIPathUserQuery:
 		a.handleUserQuery(w, r, true)
-	case method == "GET" && path == internalQueryPath:
+	case method == "GET" && path == APIPathInternalQuery:
 		a.handleInternalQuery(w, r, false)
-	case method == "HEAD" && path == internalQueryPath:
+	case method == "HEAD" && path == APIPathInternalQuery:
 		a.handleInternalQuery(w, r, true)
-	case method == "POST" && path == "/replicate":
+	case method == "POST" && path == APIPathReplicate:
 		a.handleReplicate(w, r)
-	case method == "GET" && path == "/_clusterstate":
+	case method == "GET" && path == APIPathClusterState:
 		a.handleClusterState(w, r)
 	default:
 		http.NotFound(w, r)
@@ -102,7 +110,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 	for _, hostport := range members {
 		urlStr := fmt.Sprintf(
 			"http://%s/store/%s?from=%s&to=%s&q=%s",
-			hostport, internalQueryPath,
+			hostport, APIPathInternalQuery,
 			url.QueryEscape(from), url.QueryEscape(to), url.QueryEscape(q),
 		)
 		req, err := http.NewRequest(method, urlStr, nil)
@@ -193,7 +201,6 @@ func (a *API) handleReplicate(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "No records")
 		return
 	}
-	// TODO(pb): checksum
 	if err := segment.Close(low, high); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

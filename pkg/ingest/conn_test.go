@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oklog/prototype/pkg/fs"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/oklog/prototype/pkg/fs"
 )
 
 func TestHandleConnectionsCleanup(t *testing.T) {

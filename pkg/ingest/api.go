@@ -15,6 +15,16 @@ import (
 	"github.com/oklog/prototype/pkg/cluster"
 )
 
+// These are the ingest API URL paths.
+const (
+	APIPathNext         = "/next"
+	APIPathRead         = "/read"
+	APIPathCommit       = "/commit"
+	APIPathFailed       = "/failed"
+	APIPathSegmentState = "/_segmentstate"
+	APIPathClusterState = "/_clusterstate"
+)
+
 // API serves the ingest API.
 type API struct {
 	peer              *cluster.Peer
@@ -73,17 +83,17 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Fuck all y'all's HN-frontpage-spamming zero-alloc muxers \m/(-_-)\m/
 	method, path := r.Method, r.URL.Path
 	switch {
-	case method == "GET" && path == "/next":
+	case method == "GET" && path == APIPathNext:
 		a.handleNext(w, r)
-	case method == "GET" && path == "/read":
+	case method == "GET" && path == APIPathRead:
 		a.handleRead(w, r)
-	case method == "POST" && path == "/commit":
+	case method == "POST" && path == APIPathCommit:
 		a.handleCommit(w, r)
-	case method == "POST" && path == "/failed":
+	case method == "POST" && path == APIPathFailed:
 		a.handleFailed(w, r)
-	case method == "GET" && path == "/_segmentstatus":
+	case method == "GET" && path == APIPathSegmentState:
 		a.handleSegmentStatus(w, r)
-	case method == "GET" && path == "/_clusterstate":
+	case method == "GET" && path == APIPathClusterState:
 		a.handleClusterState(w, r)
 	default:
 		http.NotFound(w, r)
@@ -190,7 +200,6 @@ func (a *API) handleRead(w http.ResponseWriter, r *http.Request) {
 		s.reading = true
 		a.pending[id] = s
 		segment <- s.segment
-		// TODO(pb): checksum
 	}
 	select {
 	case s := <-segment:

@@ -24,14 +24,15 @@ import (
 func runStore(args []string) error {
 	flagset := flag.NewFlagSet("store", flag.ExitOnError)
 	var (
-		apiAddr           = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for store API")
-		clusterAddr       = flagset.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
-		storePath         = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
-		segmentTargetSize = flagset.Int64("store.segment-target-size", 10*1024*1024, "try to keep store segments about this size")
-		segmentRetain     = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
-		segmentPurge      = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
-		filesystem        = flagset.String("filesystem", "real", "real, virtual, nop")
-		clusterPeers      = stringset{}
+		apiAddr                  = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for store API")
+		clusterAddr              = flagset.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
+		storePath                = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
+		segmentTargetSize        = flagset.Int64("store.segment-target-size", 10*1024*1024, "try to keep store segments about this size")
+		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", 2, "how many copies of each segment to replicate")
+		segmentRetain            = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
+		segmentPurge             = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
+		filesystem               = flagset.String("filesystem", "real", "real, virtual, nop")
+		clusterPeers             = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
 	if err := flagset.Parse(args); err != nil {
@@ -165,6 +166,21 @@ func runStore(args []string) error {
 		Help:      "Number of peers in the cluster from this node's perspective.",
 	}, func() float64 { return float64(peer.ClusterSize()) }))
 
+	// Create the HTTP client we'll use to consume segments.
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			ResponseHeaderTimeout: 5 * time.Second,
+			Dial: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).Dial,
+			TLSHandshakeTimeout: 10 * time.Second,
+			DisableKeepAlives:   false,
+			MaxIdleConnsPerHost: 1,
+		},
+	}
+
 	// Execution group.
 	var g group.Group
 	{
@@ -179,8 +195,9 @@ func runStore(args []string) error {
 	{
 		c := store.NewConsumer(
 			peer,
-			storeLog,
+			httpClient,
 			*segmentTargetSize,
+			*segmentReplicationFactor,
 			consumedSegments,
 			consumedBytes,
 			replicatedSegments.WithLabelValues("egress"),

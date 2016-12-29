@@ -36,7 +36,7 @@ func runIngest(args []string) error {
 		bulkAddr              = flagset.String("ingest.bulk", fmt.Sprintf("tcp://0.0.0.0:%d", defaultBulkPort), "listen address for bulk (whole-segment) writes")
 		clusterAddr           = flagset.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
 		ingestPath            = flagset.String("ingest.path", filepath.Join("data", "ingest"), "path holding segment files for ingest tier")
-		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", 25*1024*1024, "flush segments after they grow to this size")
+		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", 32*1024*1024, "flush segments after they grow to this size")
 		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
 		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
 		filesystem            = flagset.String("filesystem", "real", "real, virtual, nop")

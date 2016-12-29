@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-
-	"sync"
 
 	"github.com/oklog/ulid"
 )

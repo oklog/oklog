@@ -25,21 +25,22 @@ import (
 func runIngestStore(args []string) error {
 	flagset := flag.NewFlagSet("ingest", flag.ExitOnError)
 	var (
-		apiAddr               = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for ingest and store APIs")
-		fastAddr              = flagset.String("ingest.fast", "tcp://0.0.0.0:7651", "listen address for fast (async) writes")
-		durableAddr           = flagset.String("ingest.durable", "tcp://0.0.0.0:7652", "listen address for durable (sync) writes")
-		bulkAddr              = flagset.String("ingest.bulk", "tcp://0.0.0.0:7653", "listen address for bulk (whole-segment) writes")
-		clusterAddr           = flagset.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
-		ingestPath            = flagset.String("ingest.path", filepath.Join("data", "ingest"), "path holding segment files for ingest tier")
-		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", 25*1024*1024, "flush segments after they grow to this size")
-		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
-		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
-		storePath             = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
-		segmentTargetSize     = flagset.Int64("store.segment-target-size", 10*1024*1024, "try to keep store segments about this size")
-		segmentRetain         = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
-		segmentPurge          = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
-		filesystem            = flagset.String("filesystem", "real", "real, virtual, nop")
-		clusterPeers          = stringset{}
+		apiAddr                  = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for ingest and store APIs")
+		fastAddr                 = flagset.String("ingest.fast", "tcp://0.0.0.0:7651", "listen address for fast (async) writes")
+		durableAddr              = flagset.String("ingest.durable", "tcp://0.0.0.0:7652", "listen address for durable (sync) writes")
+		bulkAddr                 = flagset.String("ingest.bulk", "tcp://0.0.0.0:7653", "listen address for bulk (whole-segment) writes")
+		clusterAddr              = flagset.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
+		ingestPath               = flagset.String("ingest.path", filepath.Join("data", "ingest"), "path holding segment files for ingest tier")
+		segmentFlushSize         = flagset.Int("ingest.segment-flush-size", 32*1024*1024, "flush segments after they grow to this size")
+		segmentFlushAge          = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
+		segmentPendingTimeout    = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
+		storePath                = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
+		segmentTargetSize        = flagset.Int64("store.segment-target-size", 10*1024*1024, "try to keep store segments about this size")
+		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", 2, "how many copies of each segment to replicate")
+		segmentRetain            = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
+		segmentPurge             = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
+		filesystem               = flagset.String("filesystem", "real", "real, virtual, nop")
+		clusterPeers             = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
 	if err := flagset.Parse(args); err != nil {
@@ -279,6 +280,21 @@ func runIngestStore(args []string) error {
 		Help:      "Number of peers in the cluster from this node's perspective.",
 	}, func() float64 { return float64(peer.ClusterSize()) }))
 
+	// Create the HTTP client we'll use to consume segments.
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			ResponseHeaderTimeout: 5 * time.Second,
+			Dial: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).Dial,
+			TLSHandshakeTimeout: 10 * time.Second,
+			DisableKeepAlives:   false,
+			MaxIdleConnsPerHost: 1,
+		},
+	}
+
 	// Execution group.
 	var g group.Group
 	{
@@ -334,8 +350,9 @@ func runIngestStore(args []string) error {
 	{
 		c := store.NewConsumer(
 			peer,
-			storeLog,
+			httpClient,
 			*segmentTargetSize,
+			*segmentReplicationFactor,
 			consumedSegments,
 			consumedBytes,
 			replicatedSegments.WithLabelValues("egress"),
