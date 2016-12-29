@@ -211,6 +211,11 @@ func (a *API) handleReplicate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleClusterState(w http.ResponseWriter, r *http.Request) {
+	buf, err := json.MarshalIndent(a.peer.State(), "", "    ")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(a.peer.State())
+	w.Write(buf)
 }
