@@ -274,9 +274,10 @@ func (c *Consumer) resetVia(commitOrFailed string) stateFn {
 		for _, id := range ids {
 			go func(id string) {
 				defer wg.Done()
-				resp, err := c.client.Post(fmt.Sprintf("http://%s/ingest/%s?id=%s", instance, commitOrFailed, id), "text/plain", nil)
+				uri := fmt.Sprintf("http://%s/ingest/%s?id=%s", instance, commitOrFailed, id)
+				resp, err := c.client.Post(uri, "text/plain", nil)
 				if err != nil {
-					warn.Log("instance", instance, "during", "POST", "err", err)
+					warn.Log("instance", instance, "during", "POST", "uri", uri, "err", err)
 					return
 				}
 				resp.Body.Close()
