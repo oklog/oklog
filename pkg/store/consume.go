@@ -119,7 +119,7 @@ func (c *Consumer) gather() stateFn {
 	if len(instances) == 0 {
 		return c.gather // maybe some will come back later
 	}
-	if want, have := c.replicationFactor, len(c.peer.Current(cluster.PeerTypeStore)); want < have {
+	if want, have := c.replicationFactor, len(c.peer.Current(cluster.PeerTypeStore)); have < want {
 		// Don't gather if we can't replicate.
 		// Better to queue up on the ingesters.
 		warn.Log("replication_factor", want, "available_peers", have, "err", "replication currently impossible")
@@ -216,7 +216,7 @@ func (c *Consumer) replicate() stateFn {
 		indices    = rand.Perm(len(peers))
 		replicated = 0
 	)
-	if want, have := c.replicationFactor, len(peers); want < have {
+	if want, have := c.replicationFactor, len(peers); have < want {
 		warn.Log("replication_factor", want, "available_peers", have, "err", "replication currently impossible")
 		return c.fail // can't do anything here
 	}
