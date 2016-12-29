@@ -2,9 +2,9 @@ package store
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/oklog/ulid"
 )
@@ -20,15 +20,15 @@ func mergeRecords(w io.Writer, readers ...io.Reader) (low, high ulid.ULID, n int
 		first   = true
 		scanner = make([]*bufio.Scanner, len(readers))
 		ok      = make([]bool, len(readers))
-		record  = make([]string, len(readers))
-		id      = make([]string, len(readers))
+		record  = make([][]byte, len(readers))
+		id      = make([][]byte, len(readers))
 	)
 
 	// Advance moves the next record from a reader into our state.
 	advance := func(i int) error {
 		if ok[i] = scanner[i].Scan(); ok[i] {
-			record[i] = scanner[i].Text()
-			id[i] = strings.Fields(record[i])[0] // TODO(pb): profiling reveals this to be $expensive$
+			record[i] = scanner[i].Bytes()
+			id[i] = bytes.Fields(record[i])[0] // TODO(pb): is this still $expensive$?
 		} else if err := scanner[i].Err(); err != nil && err != io.EOF {
 			return err
 		}
@@ -44,44 +44,48 @@ func mergeRecords(w io.Writer, readers ...io.Reader) (low, high ulid.ULID, n int
 	}
 
 	// Loop until all readers are drained.
-	var chosen int
+	var (
+		chosenIndex int
+		chosenULID  ulid.ULID
+	)
 	for {
-		// Choose the smallest ULID.
-		chosen = -1
+		// Choose the smallest ULID from all of the IDs.
+		chosenIndex = -1
 		for i := 0; i < len(readers); i++ {
 			if !ok[i] {
 				continue
 			}
-			if chosen < 0 || id[i] < id[chosen] {
-				chosen = i
+			if chosenIndex < 0 || bytes.Compare(id[i], id[chosenIndex]) < 0 {
+				chosenIndex = i
 			}
 		}
-		if chosen < 0 {
+		if chosenIndex < 0 {
 			break // drained all the scanners
 		}
 
-		// Record the first (lowest) and last (highest) ULIDs.
-		id := ulid.MustParse(id[chosen])
-		if first {
-			low, first = id, false
-		} else if !first && id == high {
-			// Duplicate detected!
-			if err := advance(chosen); err != nil {
+		// The first ULID from this batch of readers is the low ULID.
+		// The last ULID from this batch of readers is the high ULID.
+		// Record the first ULID as low, and the latest ULID as high.
+		chosenULID.UnmarshalText(id[chosenIndex])
+		if first { // record first as low
+			low, first = chosenULID, false
+		} else if !first && chosenULID == high { // duplicate!
+			if err := advance(chosenIndex); err != nil {
 				return low, high, n, err
 			}
 			continue
 		}
-		high = id
+		high = chosenULID // record most recent as high
 
 		// Write the record.
-		n0, err := fmt.Fprintf(w, "%s\n", record[chosen])
+		n0, err := fmt.Fprintf(w, "%s\n", record[chosenIndex])
 		if err != nil {
 			return low, high, n, err
 		}
 		n += int64(n0)
 
 		// Advance the chosen scanner by 1 record.
-		if err := advance(chosen); err != nil {
+		if err := advance(chosenIndex); err != nil {
 			return low, high, n, err
 		}
 	}
@@ -122,15 +126,15 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 	var (
 		scanner = make([]*bufio.Scanner, len(readers))
 		ok      = make([]bool, len(readers))
-		record  = make([]string, len(readers))
-		id      = make([]string, len(readers))
+		record  = make([][]byte, len(readers))
+		id      = make([][]byte, len(readers))
 	)
 
 	// Advance moves the next record from a reader into our state.
 	advance := func(i int) error {
 		if ok[i] = scanner[i].Scan(); ok[i] {
-			record[i] = scanner[i].Text()
-			id[i] = strings.Fields(record[i])[0] // TODO(pb): profiling reveals this to be $expensive$
+			record[i] = scanner[i].Bytes()
+			id[i] = bytes.Fields(record[i])[0] // TODO(pb): is this still $expensive$?
 		} else if err := scanner[i].Err(); err != nil && err != io.EOF {
 			return err
 		}
@@ -146,37 +150,41 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 	}
 
 	// Loop until all readers are drained.
-	var chosen int
+	var (
+		chosenIndex int
+		chosenULID  ulid.ULID
+	)
 	for {
 		// Choose the smallest ULID.
-		chosen = -1
+		chosenIndex = -1
 		for i := 0; i < len(readers); i++ {
 			if !ok[i] {
 				continue
 			}
-			if chosen < 0 || id[i] < id[chosen] {
-				chosen = i
+			if chosenIndex < 0 || bytes.Compare(id[i], id[chosenIndex]) < 0 {
+				chosenIndex = i
 			}
 		}
-		if chosen < 0 {
+		if chosenIndex < 0 {
 			break // drained all the scanners
 		}
 
-		// Record the first (lowest) and last (highest) ULIDs.
-		id := ulid.MustParse(id[chosen])
-		if first {
-			low, first = id, false
-		} else if !first && id == high {
-			// Duplicate detected!
-			if err := advance(chosen); err != nil {
+		// The first ULID from this batch of readers is the low ULID.
+		// The last ULID from this batch of readers is the high ULID.
+		// Record the first ULID as low, and the latest ULID as high.
+		chosenULID.UnmarshalText(id[chosenIndex])
+		if first { // record first as low
+			low, first = chosenULID, false
+		} else if !first && chosenULID == high { // duplicate!
+			if err := advance(chosenIndex); err != nil {
 				return n, err
 			}
 			continue
 		}
-		high = id
+		high = chosenULID // record most recent as high
 
 		// Write the record.
-		n0, err := fmt.Fprintf(writeSegment, "%s\n", record[chosen])
+		n0, err := fmt.Fprintf(writeSegment, "%s\n", record[chosenIndex])
 		if err != nil {
 			return n, err
 		}
@@ -199,7 +207,7 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 		}
 
 		// Advance the chosen scanner by 1 record.
-		if err := advance(chosen); err != nil {
+		if err := advance(chosenIndex); err != nil {
 			return n, err
 		}
 	}

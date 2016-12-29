@@ -27,6 +27,7 @@ func runStore(args []string) error {
 		apiAddr                  = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for store API")
 		clusterAddr              = flagset.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
 		storePath                = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
+		segmentConsumers         = flagset.Int("store.segment-consumers", 1, "concurrent segment consumers")
 		segmentTargetSize        = flagset.Int64("store.segment-target-size", 10*1024*1024, "try to keep store segments about this size")
 		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", 2, "how many copies of each segment to replicate")
 		segmentRetain            = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
@@ -192,7 +193,7 @@ func runStore(args []string) error {
 			close(cancel)
 		})
 	}
-	{
+	for i := 0; i < *segmentConsumers; i++ {
 		c := store.NewConsumer(
 			peer,
 			httpClient,

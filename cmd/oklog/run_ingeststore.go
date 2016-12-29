@@ -35,6 +35,7 @@ func runIngestStore(args []string) error {
 		segmentFlushAge          = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
 		segmentPendingTimeout    = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
 		storePath                = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
+		segmentConsumers         = flagset.Int("store.segment-consumers", 1, "concurrent segment consumers")
 		segmentTargetSize        = flagset.Int64("store.segment-target-size", 10*1024*1024, "try to keep store segments about this size")
 		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", 2, "how many copies of each segment to replicate")
 		segmentRetain            = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
@@ -347,7 +348,7 @@ func runIngestStore(args []string) error {
 			bulkListener.Close()
 		})
 	}
-	{
+	for i := 0; i < *segmentConsumers; i++ {
 		c := store.NewConsumer(
 			peer,
 			httpClient,
