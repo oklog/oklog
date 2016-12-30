@@ -31,7 +31,6 @@ const (
 
 // NewFileLog returns a Log backed by the filesystem at path root.
 // Note that we don't own segment files! They may disappear.
-// TODO(pb): abstract the filesystem to make this unit-testable.
 func NewFileLog(fs fs.Filesystem, root string, segmentTargetSize int64) (Log, error) {
 	if err := fs.MkdirAll(root); err != nil {
 		return nil, err

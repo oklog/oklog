@@ -28,10 +28,12 @@ func mergeRecords(w io.Writer, readers ...io.Reader) (low, high ulid.ULID, n int
 	advance := func(i int) error {
 		if ok[i] = scanner[i].Scan(); ok[i] {
 			record[i] = scanner[i].Bytes()
-			if len(record[i]) < ulid.EncodedSize { // ick
-				panic("short record") // ick
-			} // ick
-			id[i] = record[i][:ulid.EncodedSize] // ick
+			// Something nice, like bytes.Fields, is too slow!
+			//id[i] = bytes.Fields(record[i])[0]
+			if len(record[i]) < ulid.EncodedSize {
+				panic("short record")
+			}
+			id[i] = record[i][:ulid.EncodedSize]
 		} else if err := scanner[i].Err(); err != nil && err != io.EOF {
 			return err
 		}
@@ -137,10 +139,12 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 	advance := func(i int) error {
 		if ok[i] = scanner[i].Scan(); ok[i] {
 			record[i] = scanner[i].Bytes()
-			if len(record[i]) < ulid.EncodedSize { // ick
-				panic("short record") // ick
-			} // ick
-			id[i] = record[i][:ulid.EncodedSize] // ick
+			// Something nice, like bytes.Fields, is too slow!
+			//id[i] = bytes.Fields(record[i])[0]
+			if len(record[i]) < ulid.EncodedSize {
+				panic("short record")
+			}
+			id[i] = record[i][:ulid.EncodedSize]
 		} else if err := scanner[i].Err(); err != nil && err != io.EOF {
 			return err
 		}

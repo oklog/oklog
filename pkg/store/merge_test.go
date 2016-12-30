@@ -2,10 +2,13 @@ package store
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"math/rand"
 	"strings"
 	"testing"
 
+	"github.com/oklog/prototype/pkg/fs"
 	"github.com/oklog/ulid"
 )
 
@@ -94,6 +97,53 @@ func TestMergeRecords(t *testing.T) {
 		}
 		if want, have := wantStr, buf.String(); want != have {
 			t.Errorf("%d: want %v, have %v", i, testcase.want, strings.FieldsFunc(have, func(r rune) bool { return r == '\n' }))
+		}
+	}
+}
+
+func BenchmarkMergeRecordsToLog(b *testing.B) {
+	// Need large number of big (1k) records to get the performance problems
+	// with bytes.FieldsFunc to really show themselves. If you drop these
+	// numbers too low, you don't see much of a difference.
+	const (
+		readerCount       = 10
+		recordCount       = 10000
+		recordSize        = 1024
+		segmentTargetSize = recordCount * recordSize * (readerCount / 5)
+		charset           = "0123456789ABCDEFGHJKMNPQRSTVWXYZ "
+	)
+
+	dst, err := NewFileLog(fs.NewNopFilesystem(), "/", segmentTargetSize)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	startStamp := ulid.Now()
+	rand.Seed(12345678)
+	populate := func(w io.Writer) {
+		stamp := startStamp
+		for i := 0; i < recordCount; i++ {
+			stamp += uint64(rand.Int63n(10))
+			id := ulid.MustNew(stamp, nil) // ascending records plz
+			record := make([]rune, recordSize-1-ulid.EncodedSize-1)
+			for j := range record {
+				record[j] = rune(charset[rand.Intn(len(charset))])
+			}
+			fmt.Fprintf(w, "%s %s\n", id, string(record))
+		}
+	}
+
+	readers := make([]io.Reader, readerCount)
+	for i := 0; i < readerCount; i++ {
+		var buf bytes.Buffer
+		populate(&buf)
+		readers[i] = &buf
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if n, err := mergeRecordsToLog(dst, segmentTargetSize, readers...); err != nil {
+			b.Errorf("n=%d err=%v", n, err)
 		}
 	}
 }
