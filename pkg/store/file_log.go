@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -16,7 +17,6 @@ import (
 
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/oklog/prototype/pkg/fs"
 	"github.com/oklog/ulid"
@@ -47,7 +47,6 @@ type fileLog struct {
 	fs                fs.Filesystem
 	root              string
 	segmentTargetSize int64
-	invocations       *prometheus.CounterVec // component, method
 	entropy           io.Reader
 }
 
@@ -60,19 +59,115 @@ func (log *fileLog) Create() (WriteSegment, error) {
 	return &fileWriteSegment{log.fs, f}, nil
 }
 
-func (log *fileLog) Query(from, to time.Time, q string, statsOnly bool) (QueryResult, error) {
+func (log *fileLog) Query(engine QueryEngine, from, to time.Time, q string, statsOnly bool) (QueryResult, error) {
 	var (
 		fromULID = ulid.MustNew(ulid.Timestamp(from), nil)
 		toULID   = ulid.MustNew(ulid.Timestamp(to), nil)
+		segments = log.queryMatchingSegments(fromULID, toULID)
 	)
+	switch engine {
+	case QueryEngineNaïve:
+		return log.queryNaïve(segments, fromULID, toULID, q, statsOnly)
+	case QueryEngineRipgrep:
+		return log.queryRipgrep(segments, fromULID, toULID, q, statsOnly)
+	default:
+		return QueryResult{}, errors.Errorf("unsuppoted engine %s", engine)
+	}
+}
 
+func (log *fileLog) queryNaïve(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
 	re, err := regexp.Compile(q)
 	if err != nil {
 		return QueryResult{}, err
 	}
 
-	// Find matching segments.
-	var segments []string
+	// Merge matching segments in a global time order.
+	var readers []io.Reader
+	for _, segment := range segments {
+		f, err := log.fs.Open(segment)
+		if err != nil {
+			continue
+		}
+		defer f.Close()
+		readers = append(readers, f)
+	}
+	var records bytes.Buffer
+	if _, _, _, err = mergeRecords(&records, readers...); err != nil {
+		return QueryResult{}, err
+	}
+
+	// Filter matching records.
+	var (
+		s              = bufio.NewScanner(&records)
+		filtered       = bytes.Buffer{}
+		recordsQueried = 0
+		recordsMatched = 0
+	)
+	for s.Scan() {
+		recordsQueried++
+		id := s.Bytes()[:ulid.EncodedSize]
+		if bytes.Compare(id, from[:]) < 0 {
+			continue
+		}
+		if bytes.Compare(id, to[:]) > 0 {
+			continue
+		}
+		if b := s.Bytes(); re.Match(b) {
+			recordsMatched++
+			filtered.Write(append(b, '\n'))
+		}
+	}
+	if statsOnly {
+		records.Reset()
+	} else {
+		records = filtered
+	}
+
+	// Return.
+	return QueryResult{
+		Engine:          string(QueryEngineNaïve),
+		From:            from.String(),
+		To:              to.String(),
+		Q:               q,
+		NodesQueried:    1,
+		SegmentsQueried: len(segments),
+		RecordsQueried:  recordsQueried,
+		RecordsMatched:  recordsMatched,
+		Records:         ioutil.NopCloser(&records),
+	}, nil
+}
+
+func (log *fileLog) queryRipgrep(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
+	var pipeline string
+	if q == "" {
+		pipeline = fmt.Sprintf("cat %s", strings.Join(segments, " "))
+	} else {
+		pipeline = fmt.Sprintf("rg -e %q %s", q, strings.Join(segments, " "))
+	}
+
+	// TODO(pb): need to filter out too-old and too-recent records
+
+	cmd := exec.Command("sh", "-c", pipeline)
+	var records bytes.Buffer
+	cmd.Stdout = &records
+	if err := cmd.Run(); err != nil {
+		return QueryResult{}, errors.Wrapf(err, "%s", pipeline)
+	}
+
+	return QueryResult{
+		Engine:          string(QueryEngineRipgrep),
+		From:            from.String(),
+		To:              to.String(),
+		Q:               q,
+		NodesQueried:    1,
+		SegmentsQueried: len(segments),
+		RecordsQueried:  -1,
+		RecordsMatched:  -1,
+		Records:         ioutil.NopCloser(&records),
+	}, nil
+}
+
+func (log *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []string) {
 	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -89,62 +184,14 @@ func (log *fileLog) Query(from, to time.Time, q string, statsOnly bool) (QueryRe
 		if len(fields) != 2 {
 			return nil // weird; skip
 		}
-		lowULID := ulid.MustParse(fields[0])
-		highULID := ulid.MustParse(fields[1])
-		if overlap(fromULID, toULID, lowULID, highULID) {
+		low := ulid.MustParse(fields[0])
+		high := ulid.MustParse(fields[1])
+		if overlap(from, to, low, high) {
 			segments = append(segments, path)
 		}
 		return nil
 	})
-
-	// Merge matching segments.
-	// TODO(pb): use ripgrep instead
-	var readers []io.Reader
-	for _, segment := range segments {
-		f, err := log.fs.Open(segment)
-		if err != nil {
-			continue
-		}
-		defer f.Close()
-		readers = append(readers, f)
-	}
-	var records bytes.Buffer
-	if _, _, _, err = mergeRecords(&records, readers...); err != nil {
-		return QueryResult{}, err
-	}
-
-	// Filter matching segments.
-	// TODO(pb): use ripgrep instead
-	var (
-		s              = bufio.NewScanner(&records)
-		filtered       = bytes.Buffer{}
-		recordsQueried = 0
-		recordsMatched = 0
-	)
-	for s.Scan() {
-		recordsQueried++
-		if record := s.Text(); re.MatchString(record) {
-			recordsMatched++
-			fmt.Fprintf(&filtered, "%s\n", record)
-		}
-	}
-	if statsOnly { // TODO(pb): optimize?
-		records.Reset()
-	} else {
-		records = filtered
-	}
-
-	// Return.
-	return QueryResult{
-		From:            from.String(),
-		To:              to.String(),
-		Q:               q,
-		NodesQueried:    1,
-		SegmentsQueried: len(segments),
-		RecordsQueried:  recordsQueried,
-		RecordsMatched:  recordsMatched,
-		Records:         ioutil.NopCloser(&records),
-	}, nil
+	return segments
 }
 
 func (log *fileLog) Overlapping() ([]ReadSegment, error) {

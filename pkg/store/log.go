@@ -14,7 +14,7 @@ type Log interface {
 	Create() (WriteSegment, error)
 
 	// Query written and closed segments.
-	Query(from, to time.Time, q string, statsOnly bool) (QueryResult, error)
+	Query(engine QueryEngine, from, to time.Time, q string, statsOnly bool) (QueryResult, error)
 
 	// Overlapping returns segments that have a high degree of time overlap and
 	// can be compacted.
@@ -40,6 +40,15 @@ type Log interface {
 // ErrNoSegmentsAvailable is returned by various methods to
 // indicate no qualifying segments are currently available.
 var ErrNoSegmentsAvailable = errors.New("no segments available")
+
+// QueryEngine is how the Log makes queries.
+type QueryEngine string
+
+// These are the supported engines.
+const (
+	QueryEngineNaïve   QueryEngine = "naïve"
+	QueryEngineRipgrep QueryEngine = "ripgrep"
+)
 
 // WriteSegment can be written to, and either closed or deleted.
 type WriteSegment interface {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -96,10 +97,15 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 	}
 
 	var (
-		from = r.URL.Query().Get("from")
-		to   = r.URL.Query().Get("to")
-		q    = r.URL.Query().Get("q")
+		engine = r.URL.Query().Get("engine")
+		from   = r.URL.Query().Get("from")
+		to     = r.URL.Query().Get("to")
+		q      = r.URL.Query().Get("q")
 	)
+
+	if engine == "" {
+		engine = "naïve"
+	}
 
 	method := "GET"
 	if statsOnly {
@@ -109,9 +115,9 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 	var requests []*http.Request
 	for _, hostport := range members {
 		urlStr := fmt.Sprintf(
-			"http://%s/store/%s?from=%s&to=%s&q=%s",
+			"http://%s/store/%s?engine=%s&from=%s&to=%s&q=%s",
 			hostport, APIPathInternalQuery,
-			url.QueryEscape(from), url.QueryEscape(to), url.QueryEscape(q),
+			url.QueryEscape(engine), url.QueryEscape(from), url.QueryEscape(to), url.QueryEscape(q),
 		)
 		req, err := http.NewRequest(method, urlStr, nil)
 		if err != nil {
@@ -161,10 +167,21 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 
 func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request, statsOnly bool) {
 	var (
-		fromStr = r.URL.Query().Get("from")
-		toStr   = r.URL.Query().Get("to")
-		q       = r.URL.Query().Get("q")
+		engineStr = r.URL.Query().Get("engine")
+		fromStr   = r.URL.Query().Get("from")
+		toStr     = r.URL.Query().Get("to")
+		q         = r.URL.Query().Get("q")
 	)
+	var engine QueryEngine
+	switch strings.ToLower(engineStr) {
+	case "naïve", "naive", "":
+		engine = QueryEngineNaïve
+	case "ripgrep", "rg":
+		engine = QueryEngineRipgrep
+	default:
+		http.Error(w, fmt.Sprintf("unsupported engine %s", engineStr), http.StatusBadRequest)
+		return
+	}
 	from, err := time.Parse(time.RFC3339Nano, fromStr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -176,7 +193,7 @@ func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request, statsO
 		return
 	}
 
-	result, err := a.log.Query(from, to, q, statsOnly)
+	result, err := a.log.Query(engine, from, to, q, statsOnly)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

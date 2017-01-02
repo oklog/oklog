@@ -23,7 +23,7 @@ do
     -api                       tcp://0.0.0.0:200${i}0 \
     -cluster                   tcp://0.0.0.0:200${i}9 \
     -store.path                data/store/${i} \
-    -store.segment-target-size 100000 \
+    -store.segment-target-size 1000000 \
     -store.segment-retain      2m \
     -store.segment-purge       10m \
     $PEERS 2>&1 | sed -e "s/^/[S$i] /" &

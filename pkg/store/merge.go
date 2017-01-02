@@ -83,11 +83,16 @@ func mergeRecords(w io.Writer, readers ...io.Reader) (low, high ulid.ULID, n int
 		high = chosenULID // record most recent as high
 
 		// Write the record.
-		n0, err := fmt.Fprintf(w, "%s\n", record[chosenIndex])
+		n0, err := w.Write(record[chosenIndex])
 		if err != nil {
 			return low, high, n, err
 		}
 		n += int64(n0)
+		n1, err := w.Write([]byte{'\n'})
+		if err != nil {
+			return low, high, n, err
+		}
+		n += int64(n1)
 
 		// Advance the chosen scanner by 1 record.
 		if err := advance(chosenIndex); err != nil {

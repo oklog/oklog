@@ -10,9 +10,10 @@ import (
 
 // QueryResult contains statistics about, and matching records for, a query.
 type QueryResult struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-	Q    string `json:"q"`
+	Engine string `json:"engine"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Q      string `json:"q"`
 
 	NodesQueried    int `json:"nodes_queried"`
 	SegmentsQueried int `json:"segments_queried"`
@@ -25,6 +26,7 @@ type QueryResult struct {
 
 // DecodeFrom decodes the QueryResult from the HTTP response.
 func (qr *QueryResult) DecodeFrom(resp *http.Response) {
+	qr.Engine = resp.Header.Get(httpHeaderEngine)
 	qr.From = resp.Header.Get(httpHeaderFrom)
 	qr.To = resp.Header.Get(httpHeaderTo)
 	qr.Q = resp.Header.Get(httpHeaderQ)
@@ -37,6 +39,7 @@ func (qr *QueryResult) DecodeFrom(resp *http.Response) {
 
 // EncodeTo encodes the QueryResult to the HTTP response writer.
 func (qr *QueryResult) EncodeTo(w http.ResponseWriter) {
+	w.Header().Set(httpHeaderEngine, qr.Engine)
 	w.Header().Set(httpHeaderFrom, qr.From)
 	w.Header().Set(httpHeaderTo, qr.To)
 	w.Header().Set(httpHeaderQ, qr.Q)
@@ -76,6 +79,7 @@ func (qr *QueryResult) Merge(other QueryResult) {
 }
 
 const (
+	httpHeaderEngine          = "X-OKLog-Engine"
 	httpHeaderFrom            = "X-OKLog-From"
 	httpHeaderTo              = "X-OKLog-To"
 	httpHeaderQ               = "X-OKLog-Q"

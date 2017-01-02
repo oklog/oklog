@@ -21,7 +21,7 @@ import (
 func runForward(args []string) error {
 	flagset := flag.NewFlagSet("forward", flag.ExitOnError)
 	var (
-		apiAddr = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for forward API (and metrics)")
+		apiAddr = flagset.String("api", fmt.Sprintf("tcp://0.0.0.0:%d", defaultAPIPort), "listen address for forward API (and metrics)")
 	)
 	if err := flagset.Parse(args); err != nil {
 		return err
@@ -84,12 +84,16 @@ func runForward(args []string) error {
 	// Parse URLs for forwarders.
 	var urls []*url.URL
 	for _, addr := range args {
-		u, err := url.Parse(strings.ToLower(addr))
+		schema, host, _, _, err := parseAddr(addr, defaultFastPort)
 		if err != nil {
 			return errors.Wrap(err, "parsing ingest address")
 		}
+		u, err := url.Parse(fmt.Sprintf("%s://%s", schema, host))
+		if err != nil {
+			return errors.Wrap(err, "parsing ingest URL")
+		}
 		if _, _, err := net.SplitHostPort(u.Host); err != nil {
-			return errors.Wrapf(err, "host:port portion of ingest address %s", addr)
+			return errors.Wrapf(err, "couldn't split host:port")
 		}
 		urls = append(urls, u)
 	}
@@ -106,7 +110,6 @@ func runForward(args []string) error {
 	// TODO(pb): have flag for backpressure vs. drop
 	var (
 		s       = bufio.NewScanner(os.Stdin)
-		ok      = s.Scan()
 		backoff = time.Duration(0)
 	)
 
@@ -173,6 +176,7 @@ func runForward(args []string) error {
 			continue
 		}
 
+		ok := s.Scan()
 		for ok {
 			// We enter the loop wanting to write s.Text() to the conn.
 			record := s.Text()
