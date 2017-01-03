@@ -145,9 +145,10 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 		responses[i] = <-c
 	}
 	result := QueryResult{
-		From: from,
-		To:   to,
-		Q:    q,
+		Engine: engine,
+		From:   from,
+		To:     to,
+		Q:      q,
 	}
 	for _, response := range responses {
 		if response.err != nil {

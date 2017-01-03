@@ -36,7 +36,7 @@ func runIngestStore(args []string) error {
 		segmentPendingTimeout    = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
 		storePath                = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
 		segmentConsumers         = flagset.Int("store.segment-consumers", 1, "concurrent segment consumers")
-		segmentTargetSize        = flagset.Int64("store.segment-target-size", 10*1024*1024, "try to keep store segments about this size")
+		segmentTargetSize        = flagset.Int64("store.segment-target-size", 32*1024*1024, "try to keep store segments about this size")
 		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", 2, "how many copies of each segment to replicate")
 		segmentRetain            = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
 		segmentPurge             = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")

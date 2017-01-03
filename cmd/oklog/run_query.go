@@ -20,11 +20,14 @@ func runQuery(args []string) error {
 		from      = flagset.String("from", "-1h", "from, as RFC3339 timestamp or duration")
 		to        = flagset.String("to", "now", "to, as RFC3339 timestamp or duration")
 		q         = flagset.String("q", "", "query expression")
+		engine    = flagset.String("engine", "lazy", "naïve, ripgrep, lazy")
 		stats     = flagset.Bool("stats", false, "statistics only, no records")
 	)
 	if err := flagset.Parse(args); err != nil {
 		return err
 	}
+
+	begin := time.Now()
 
 	fromDuration, durationErr := time.ParseDuration(*from)
 	fromTime, timeErr := time.Parse(time.RFC3339Nano, *from)
@@ -65,8 +68,9 @@ func runQuery(args []string) error {
 
 	// TODO(pb): use const or client lib for URL
 	req, err := http.NewRequest(method, fmt.Sprintf(
-		"http://%s/store/query?from=%s&to=%s&q=%s",
+		"http://%s/store/query?engine=%s&from=%s&to=%s&q=%s",
 		*storeAddr,
+		url.QueryEscape(*engine),
 		url.QueryEscape(fromStr),
 		url.QueryEscape(toStr),
 		url.QueryEscape(*q),
@@ -82,11 +86,17 @@ func runQuery(args []string) error {
 	var result store.QueryResult
 	result.DecodeFrom(resp)
 
+	fmt.Fprintf(os.Stderr, "Response in %s\n", time.Since(begin))
+	fmt.Fprintf(os.Stderr, "Used engine %s\n", result.Engine)
+	fmt.Fprintf(os.Stderr, "Queried from %s\n", result.From)
+	fmt.Fprintf(os.Stderr, "Queried to %s\n", result.To)
+	fmt.Fprintf(os.Stderr, "Queried expression %q\n", result.Q)
 	fmt.Fprintf(os.Stderr, "%d node(s) queried\n", result.NodesQueried)
 	fmt.Fprintf(os.Stderr, "%d segment(s) queried\n", result.SegmentsQueried)
 	fmt.Fprintf(os.Stderr, "%d record(s) queried\n", result.RecordsQueried)
 	fmt.Fprintf(os.Stderr, "%d record(s) matched\n", result.RecordsMatched)
 	fmt.Fprintf(os.Stderr, "%d error(s)\n", result.ErrorCount)
+
 	io.Copy(os.Stdout, result.Records)
 	result.Records.Close()
 	return nil
