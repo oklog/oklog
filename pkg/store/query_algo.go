@@ -55,26 +55,25 @@ func batchSegments(segments []string) [][]string {
 		b      string   // of the group
 	)
 	for i := range segments {
-		// If the group is empty, it gets the segment.
-		if len(group) <= 0 {
+		switch {
+		case len(group) <= 0:
+			// If the group is empty, it gets the segment.
 			group = []string{segments[i]}
 			b = ranges[i].b
-			continue
-		}
 
-		// If the current segment doesn't overlap with the group,
-		// the group is closed and we start a new group.
-		if ranges[i].a > b {
+		case ranges[i].a > b:
+			// If the current segment doesn't overlap with the group,
+			// the group is closed and we start a new group.
 			result = append(result, group)
 			group = []string{segments[i]}
 			b = ranges[i].b
-			continue
-		}
 
-		// The current segment overlaps with the group,
-		// so it is absorbed into the group.
-		group = append(group, segments[i])
-		b = max(b, ranges[i].b)
+		default:
+			// The current segment overlaps with the group,
+			// so it is absorbed into the group.
+			group = append(group, segments[i])
+			b = max(b, ranges[i].b)
+		}
 	}
 	if len(group) > 0 {
 		result = append(result, group)
