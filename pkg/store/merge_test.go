@@ -13,6 +13,8 @@ import (
 )
 
 func TestMergeRecords(t *testing.T) {
+	t.Parallel()
+
 	var (
 		u100 = ulid.MustNew(100, nil).String()
 		u101 = ulid.MustNew(101, nil).String()

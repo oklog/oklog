@@ -34,7 +34,7 @@ func testQueryEngine(t *testing.T, engine QueryEngine) {
 	var (
 		from, _   = time.Parse(time.RFC3339, "2017-01-03T00:36:01+01:00")
 		to, _     = time.Parse(time.RFC3339, "2017-01-04T00:38:59+01:00")
-		q         = "7"
+		q         = "7A(0|1)"
 		statsOnly = false
 	)
 
