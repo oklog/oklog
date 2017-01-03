@@ -70,128 +70,11 @@ func (log *fileLog) Query(engine QueryEngine, from, to time.Time, q string, stat
 		return log.queryNaïve(segments, fromULID, toULID, q, statsOnly)
 	case QueryEngineRipgrep:
 		return log.queryRipgrep(segments, fromULID, toULID, q, statsOnly)
+	case QueryEngineMerge:
+		return log.queryMerge(segments, fromULID, toULID, q, statsOnly)
 	default:
 		return QueryResult{}, errors.Errorf("unsuppoted engine %s", engine)
 	}
-}
-
-func (log *fileLog) queryNaïve(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
-	re, err := regexp.Compile(q)
-	if err != nil {
-		return QueryResult{}, err
-	}
-
-	// Merge matching segments in a global time order.
-	var readers []io.Reader
-	for _, segment := range segments {
-		f, err := log.fs.Open(segment)
-		if err != nil {
-			continue
-		}
-		defer f.Close()
-		readers = append(readers, f)
-	}
-	var records bytes.Buffer
-	if _, _, _, err = mergeRecords(&records, readers...); err != nil {
-		return QueryResult{}, err
-	}
-
-	// Filter matching records.
-	var (
-		s              = bufio.NewScanner(&records)
-		filtered       = bytes.Buffer{}
-		recordsQueried = 0
-		recordsMatched = 0
-	)
-	for s.Scan() {
-		recordsQueried++
-		id := s.Bytes()[:ulid.EncodedSize]
-		if bytes.Compare(id, from[:]) < 0 {
-			continue
-		}
-		if bytes.Compare(id, to[:]) > 0 {
-			continue
-		}
-		if b := s.Bytes(); re.Match(b) {
-			recordsMatched++
-			filtered.Write(append(b, '\n'))
-		}
-	}
-	if statsOnly {
-		records.Reset()
-	} else {
-		records = filtered
-	}
-
-	// Return.
-	return QueryResult{
-		Engine:          string(QueryEngineNaïve),
-		From:            from.String(),
-		To:              to.String(),
-		Q:               q,
-		NodesQueried:    1,
-		SegmentsQueried: len(segments),
-		RecordsQueried:  recordsQueried,
-		RecordsMatched:  recordsMatched,
-		Records:         ioutil.NopCloser(&records),
-	}, nil
-}
-
-func (log *fileLog) queryRipgrep(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
-	var pipeline string
-	if q == "" {
-		pipeline = fmt.Sprintf("cat %s", strings.Join(segments, " "))
-	} else {
-		pipeline = fmt.Sprintf("rg -e %q %s", q, strings.Join(segments, " "))
-	}
-
-	// TODO(pb): need to filter out too-old and too-recent records
-
-	cmd := exec.Command("sh", "-c", pipeline)
-	var records bytes.Buffer
-	cmd.Stdout = &records
-	if err := cmd.Run(); err != nil {
-		return QueryResult{}, errors.Wrapf(err, "%s", pipeline)
-	}
-
-	return QueryResult{
-		Engine:          string(QueryEngineRipgrep),
-		From:            from.String(),
-		To:              to.String(),
-		Q:               q,
-		NodesQueried:    1,
-		SegmentsQueried: len(segments),
-		RecordsQueried:  -1,
-		RecordsMatched:  -1,
-		Records:         ioutil.NopCloser(&records),
-	}, nil
-}
-
-func (log *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []string) {
-	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil // descend
-		}
-		// We should query .reading segments, too.
-		// Better to get duplicates than miss records.
-		if ext := filepath.Ext(path); !(ext == extFlushed || ext == extReading) {
-			return nil // skip
-		}
-		fields := strings.SplitN(basename(path), "-", 2)
-		if len(fields) != 2 {
-			return nil // weird; skip
-		}
-		low := ulid.MustParse(fields[0])
-		high := ulid.MustParse(fields[1])
-		if overlap(from, to, low, high) {
-			segments = append(segments, path)
-		}
-		return nil
-	})
-	return segments
 }
 
 func (log *fileLog) Overlapping() ([]ReadSegment, error) {
@@ -411,6 +294,181 @@ func (log *fileLog) Stats() (LogStats, error) {
 		return nil
 	})
 	return stats, nil
+}
+
+func (log *fileLog) queryNaïve(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
+	re, err := regexp.Compile(q)
+	if err != nil {
+		return QueryResult{}, err
+	}
+
+	// Merge matching segments in a global time order.
+	var readers []io.Reader
+	for _, segment := range segments {
+		f, err := log.fs.Open(segment)
+		if err != nil {
+			continue
+		}
+		defer f.Close()
+		readers = append(readers, f)
+	}
+	var records bytes.Buffer
+	if _, _, _, err = mergeRecords(&records, readers...); err != nil {
+		return QueryResult{}, err
+	}
+
+	// Filter matching records.
+	var (
+		s              = bufio.NewScanner(&records)
+		filtered       = bytes.Buffer{}
+		recordsQueried = 0
+		recordsMatched = 0
+		fromBytes      = []byte(from.String())
+		toBytes        = []byte(to.String())
+	)
+	for s.Scan() {
+		recordsQueried++
+		id := s.Bytes()[:ulid.EncodedSize]
+		if bytes.Compare(id, fromBytes) < 0 {
+			continue
+		}
+		if bytes.Compare(id, toBytes) > 0 {
+			continue
+		}
+		if b := s.Bytes(); re.Match(b) {
+			recordsMatched++
+			filtered.Write(append(b, '\n'))
+		}
+	}
+	if statsOnly {
+		records.Reset()
+	} else {
+		records = filtered
+	}
+
+	// Return.
+	return QueryResult{
+		Engine:          string(QueryEngineNaïve),
+		From:            from.String(),
+		To:              to.String(),
+		Q:               q,
+		NodesQueried:    1,
+		SegmentsQueried: len(segments),
+		RecordsQueried:  recordsQueried,
+		RecordsMatched:  recordsMatched,
+		Records:         ioutil.NopCloser(&records),
+	}, nil
+}
+
+func (log *fileLog) queryRipgrep(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
+	var pipeline string
+	if q == "" {
+		pipeline = fmt.Sprintf("cat %s", strings.Join(segments, " "))
+	} else {
+		pipeline = fmt.Sprintf("rg -e %q %s", q, strings.Join(segments, " "))
+	}
+
+	// TODO(pb): need to filter out too-old and too-recent records
+
+	cmd := exec.Command("sh", "-c", pipeline)
+	var records bytes.Buffer
+	cmd.Stdout = &records
+	if err := cmd.Run(); err != nil {
+		return QueryResult{}, errors.Wrapf(err, "%s", pipeline)
+	}
+
+	// TODO(pb): statsOnly requires a different code path altogether
+
+	return QueryResult{
+		Engine:          string(QueryEngineRipgrep),
+		From:            from.String(),
+		To:              to.String(),
+		Q:               q,
+		NodesQueried:    1,
+		SegmentsQueried: len(segments),
+		RecordsQueried:  -1,
+		RecordsMatched:  -1,
+		Records:         ioutil.NopCloser(&records),
+	}, nil
+}
+
+func (log *fileLog) queryMerge(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
+	var (
+		fromBytes = []byte(from.String())
+		toBytes   = []byte(to.String())
+	)
+	filters := []func([]byte) bool{
+		func(b []byte) bool { return bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 },
+		func(b []byte) bool { return bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 },
+	}
+	if q != "" {
+		re, err := regexp.Compile(q)
+		if err != nil {
+			return QueryResult{}, err
+		}
+		filters = append(filters, func(b []byte) bool { return re.Match(b) })
+	}
+
+	r, err := newBatchReader(log.fs, segments)
+	if err != nil {
+		return QueryResult{}, err
+	}
+
+	// TODO(pb): statsOnly requires a different code path altogether
+
+	return QueryResult{
+		Engine:          string(QueryEngineMerge),
+		From:            from.String(),
+		To:              to.String(),
+		Q:               q,
+		NodesQueried:    1,
+		SegmentsQueried: len(segments),
+		RecordsQueried:  -1,
+		RecordsMatched:  -1,
+		Records:         ioutil.NopCloser(newRecordFilteringReader(r, filters...)),
+	}, nil
+}
+
+func (log *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []string) {
+	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil // descend
+		}
+		// We should query .reading segments, too.
+		// Better to get duplicates than miss records.
+		if ext := filepath.Ext(path); !(ext == extFlushed || ext == extReading) {
+			return nil // skip
+		}
+		fields := strings.SplitN(basename(path), "-", 2)
+		if len(fields) != 2 {
+			return nil // weird; skip
+		}
+		low := ulid.MustParse(fields[0])
+		high := ulid.MustParse(fields[1])
+		if overlap(from, to, low, high) {
+			segments = append(segments, path)
+		}
+		return nil
+	})
+	sort.Slice(segments, func(i, j int) bool {
+		a, _ := parseSegmentFilename(segments[i])
+		b, _ := parseSegmentFilename(segments[j])
+		return a < b
+	})
+	return segments
+}
+
+func parseSegmentFilename(filename string) (from, to string) {
+	f := strings.SplitN(basename(filename), "-", 2)
+	return f[0], f[1]
+}
+
+func parseSegmentFilenameAsULID(filename string) (from, to ulid.ULID) {
+	a, b := parseSegmentFilename(filename)
+	return ulid.MustParse(a), ulid.MustParse(b)
 }
 
 type fileWriteSegment struct {
