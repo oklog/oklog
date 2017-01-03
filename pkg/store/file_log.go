@@ -327,14 +327,18 @@ func (log *fileLog) queryNaïve(segments []string, from, to ulid.ULID, q string,
 	)
 	for s.Scan() {
 		recordsQueried++
-		id := s.Bytes()[:ulid.EncodedSize]
+		b := s.Bytes()
+		if len(b) < ulid.EncodedSize {
+			continue // weird
+		}
+		id := b[:ulid.EncodedSize]
 		if bytes.Compare(id, fromBytes) < 0 {
 			continue
 		}
 		if bytes.Compare(id, toBytes) > 0 {
 			continue
 		}
-		if b := s.Bytes(); re.Match(b) {
+		if re.Match(b) {
 			recordsMatched++
 			filtered.Write(append(b, '\n'))
 		}
