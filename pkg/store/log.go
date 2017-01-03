@@ -48,7 +48,7 @@ type QueryEngine string
 const (
 	QueryEngineNaïve   QueryEngine = "naïve"
 	QueryEngineRipgrep QueryEngine = "ripgrep"
-	QueryEngineMerge   QueryEngine = "merge"
+	QueryEngineLazy    QueryEngine = "lazy"
 )
 
 // WriteSegment can be written to, and either closed or deleted.

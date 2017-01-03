@@ -14,7 +14,7 @@ import (
 
 func TestQueryEngineNaïve(t *testing.T)   { testQueryEngine(t, QueryEngineNaïve) }
 func TestQueryEngineRipgrep(t *testing.T) { testQueryEngine(t, QueryEngineRipgrep) }
-func TestQueryEngineMerge(t *testing.T)   { testQueryEngine(t, QueryEngineMerge) }
+func TestQueryEngineLazy(t *testing.T)    { testQueryEngine(t, QueryEngineLazy) }
 
 func testQueryEngine(t *testing.T, engine QueryEngine) {
 	storeRoots := os.Getenv("STORE_ROOTS")

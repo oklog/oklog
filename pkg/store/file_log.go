@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,7 +38,6 @@ func NewFileLog(fs fs.Filesystem, root string, segmentTargetSize int64) (Log, er
 		fs:                fs,
 		root:              root,
 		segmentTargetSize: segmentTargetSize,
-		entropy:           rand.New(rand.NewSource(time.Now().UnixNano())),
 	}, nil
 }
 
@@ -47,7 +45,6 @@ type fileLog struct {
 	fs                fs.Filesystem
 	root              string
 	segmentTargetSize int64
-	entropy           io.Reader
 }
 
 func (log *fileLog) Create() (WriteSegment, error) {
@@ -70,10 +67,10 @@ func (log *fileLog) Query(engine QueryEngine, from, to time.Time, q string, stat
 		return log.queryNaïve(segments, fromULID, toULID, q, statsOnly)
 	case QueryEngineRipgrep:
 		return log.queryRipgrep(segments, fromULID, toULID, q, statsOnly)
-	case QueryEngineMerge:
-		return log.queryMerge(segments, fromULID, toULID, q, statsOnly)
+	case QueryEngineLazy:
+		return log.queryLazy(segments, fromULID, toULID, q, statsOnly)
 	default:
-		return QueryResult{}, errors.Errorf("unsuppoted engine %s", engine)
+		return QueryResult{}, errors.Errorf("unsupported engine %s", engine)
 	}
 }
 
@@ -151,7 +148,7 @@ func (log *fileLog) Overlapping() ([]ReadSegment, error) {
 func (log *fileLog) Sequential() ([]ReadSegment, error) {
 	// First we need to build an index of all of the segments in time order.
 	// For this we only need the first ULID in the segment.
-	var segments sortableSegments
+	var segmentInfos []segmentInfo
 	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -166,16 +163,15 @@ func (log *fileLog) Sequential() ([]ReadSegment, error) {
 		if len(fields) != 2 {
 			return nil // weird; skip
 		}
-		low := ulid.MustParse(fields[0])
-		segments = append(segments, sortableSegment{low, path, info.Size()})
+		segmentInfos = append(segmentInfos, segmentInfo{fields[0], path, info.Size()})
 		return nil
 	})
-	sort.Sort(segments)
+	sort.Slice(segmentInfos, func(i, j int) bool { return segmentInfos[i].lowID < segmentInfos[j].lowID })
 
 	// We'll walk all the segments and try to get at least 2 that are
 	// small enough to compact together to the given target size.
 	const minimumSegments = 2
-	candidates := chooseFirstSequential(segments, minimumSegments, log.segmentTargetSize)
+	candidates := chooseFirstSequential(segmentInfos, minimumSegments, log.segmentTargetSize)
 	if len(candidates) < minimumSegments {
 		return nil, ErrNoSegmentsAvailable // no problem
 	}
@@ -296,6 +292,9 @@ func (log *fileLog) Stats() (LogStats, error) {
 	return stats, nil
 }
 
+// queryNaïve does a blind K-way merge of matching segments into memory,
+// then per-record filtering for time boundaries and the query expression.
+// The returned Records io.Reader is just an in-memory buffer.
 func (log *fileLog) queryNaïve(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
 	re, err := regexp.Compile(q)
 	if err != nil {
@@ -360,6 +359,9 @@ func (log *fileLog) queryNaïve(segments []string, from, to ulid.ULID, q string,
 	}, nil
 }
 
+// queryRipgrep just shells out to ripgrep -- or cat, if no q is specified.
+// It doesn't accurately filter on time bounds, or ensure correct order.
+// It's here to serve as a "target" benchmark for other implementations.
 func (log *fileLog) queryRipgrep(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
 	var pipeline string
 	if q == "" {
@@ -392,11 +394,16 @@ func (log *fileLog) queryRipgrep(segments []string, from, to ulid.ULID, q string
 	}, nil
 }
 
-func (log *fileLog) queryMerge(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
+// queryLazy is like naïve, but via lazy-evaluated (streaming) readers.
+// We build up the chain of readers and return a result quite quickly.
+// Costs are deferred to whoever reads the QueryResult Records.
+func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
 	var (
 		fromBytes = []byte(from.String())
 		toBytes   = []byte(to.String())
 	)
+
+	// Build the filters, including compiling the regex, if applicable.
 	filters := []func([]byte) bool{
 		func(b []byte) bool { return bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 },
 		func(b []byte) bool { return bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 },
@@ -409,15 +416,19 @@ func (log *fileLog) queryMerge(segments []string, from, to ulid.ULID, q string, 
 		filters = append(filters, func(b []byte) bool { return re.Match(b) })
 	}
 
-	r, err := newBatchReader(log.fs, segments)
+	// The batch reader sets up an optimized K-way merge.
+	batchReader, err := newBatchReader(log.fs, segments)
 	if err != nil {
 		return QueryResult{}, err
 	}
 
+	// The filter reader applies the filters to the results.
+	filterReader := newRecordFilteringReader(batchReader, filters...)
+
 	// TODO(pb): statsOnly requires a different code path altogether
 
 	return QueryResult{
-		Engine:          string(QueryEngineMerge),
+		Engine:          string(QueryEngineLazy),
 		From:            from.String(),
 		To:              to.String(),
 		Q:               q,
@@ -425,10 +436,12 @@ func (log *fileLog) queryMerge(segments []string, from, to ulid.ULID, q string, 
 		SegmentsQueried: len(segments),
 		RecordsQueried:  -1,
 		RecordsMatched:  -1,
-		Records:         ioutil.NopCloser(newRecordFilteringReader(r, filters...)),
+		Records:         ioutil.NopCloser(filterReader),
 	}, nil
 }
 
+// queryMatchingSegments returns a sorted slice of all segment files
+// that could possibly have records in the provided time range.
 func (log *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []string) {
 	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -454,21 +467,11 @@ func (log *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []string
 		return nil
 	})
 	sort.Slice(segments, func(i, j int) bool {
-		a, _ := parseSegmentFilename(segments[i])
-		b, _ := parseSegmentFilename(segments[j])
+		a := strings.SplitN(basename(segments[i]), "-", 2)[0]
+		b := strings.SplitN(basename(segments[j]), "-", 2)[0]
 		return a < b
 	})
 	return segments
-}
-
-func parseSegmentFilename(filename string) (from, to string) {
-	f := strings.SplitN(basename(filename), "-", 2)
-	return f[0], f[1]
-}
-
-func parseSegmentFilenameAsULID(filename string) (from, to ulid.ULID) {
-	a, b := parseSegmentFilename(filename)
-	return ulid.MustParse(a), ulid.MustParse(b)
 }
 
 type fileWriteSegment struct {
@@ -567,25 +570,26 @@ func (t fileTrashSegment) Purge() error {
 	return t.fs.Remove(t.f.Name())
 }
 
-func chooseFirstSequential(segments sortableSegments, minimum int, targetSize int64) []string {
-	// We'll walk all the segments and try to get at least minimum that are
-	// small enough to compact together to less than the targetSize.
+// chooseFirstSequential segments that are small enough to compact together to
+// less than the target size. Don't bother returning anything if you can't find
+// at least minimum.
+func chooseFirstSequential(segmentInfos []segmentInfo, minimum int, targetSize int64) []string {
 	var (
 		candidates    []string
 		candidateSize int64
 	)
-	for _, segment := range segments {
-		if (candidateSize + segment.size) <= targetSize {
+	for _, si := range segmentInfos {
+		if (candidateSize + si.size) <= targetSize {
 			// We can take this segment. Merge.
-			candidates = append(candidates, segment.path)
-			candidateSize += segment.size
+			candidates = append(candidates, si.path)
+			candidateSize += si.size
 		} else if len(candidates) >= minimum {
 			// We can't take this segment, but we have enough already. Break.
 			break
-		} else if segment.size <= targetSize {
+		} else if si.size <= targetSize {
 			// We can't *take* this segment, but we can *start* with it. Reset.
-			candidates = []string{segment.path}
-			candidateSize = segment.size
+			candidates = []string{si.path}
+			candidateSize = si.size
 		} else {
 			// We can't take or start with this segment. Clear.
 			candidates = []string{}
@@ -598,17 +602,11 @@ func chooseFirstSequential(segments sortableSegments, minimum int, targetSize in
 	return candidates
 }
 
-type sortableSegment struct {
-	low  ulid.ULID
-	path string
-	size int64
+type segmentInfo struct {
+	lowID string
+	path  string
+	size  int64
 }
-
-type sortableSegments []sortableSegment
-
-func (s sortableSegments) Len() int           { return len(s) }
-func (s sortableSegments) Less(i, j int) bool { return bytes.Compare(s[i].low[:], s[j].low[:]) < 0 }
-func (s sortableSegments) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 func basename(path string) string {
 	base := filepath.Base(path)

@@ -178,8 +178,8 @@ func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request, statsO
 		engine = QueryEngineNaïve
 	case "ripgrep", "rg":
 		engine = QueryEngineRipgrep
-	case "merge":
-		engine = QueryEngineMerge
+	case "lazy":
+		engine = QueryEngineLazy
 	default:
 		http.Error(w, fmt.Sprintf("unsupported engine %s", engineStr), http.StatusBadRequest)
 		return
