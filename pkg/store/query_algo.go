@@ -8,6 +8,7 @@ import (
 
 	"github.com/oklog/prototype/pkg/fs"
 	"github.com/oklog/ulid"
+	"github.com/pkg/errors"
 )
 
 // newBatchReader converts a batch of segment files to a single io.Reader.
@@ -34,8 +35,8 @@ func newBatchReader(fs fs.Filesystem, segments []string) (io.Reader, error) {
 		readers = append(readers, r)
 	}
 
-	// The sequential reader drains each reader in sequence.
-	return sequentialReader(readers), nil
+	// The MultiReader drains each reader in sequence.
+	return io.MultiReader(readers...), nil
 }
 
 // batchSegments batches segments together if they overlap in time.
@@ -89,46 +90,6 @@ func max(a, b string) string {
 	return b
 }
 
-// sequentialReader reads from each reader in sequence.
-type sequentialReader []io.Reader
-
-func (r sequentialReader) Read(p []byte) (int, error) {
-	// Check if we're not already done.
-	if len(r) <= 0 {
-		return 0, io.EOF
-	}
-
-	// Get ready to read something.
-	var (
-		n   int
-		err = io.EOF
-	)
-	for err == io.EOF && len(r) > 0 {
-		// Read from the first reader.
-		n, err = r[0].Read(p)
-
-		// If we read anything, we should return it.
-		// Even if we got EOF, return it anyway.
-		if n > 0 {
-			return n, err
-		}
-
-		// We didn't read anything. If we got EOF,
-		// try the next reader straight away.
-		if err == io.EOF {
-			r = r[1:]
-			continue
-		}
-
-		// We didn't read anything, and we got a non-EOF.
-		// This is fatal.
-		return n, err
-	}
-
-	// We've drained all our readers.
-	return n, err
-}
-
 // mergeReader performs a K-way merge from multiple readers.
 type mergeReader struct {
 	scanner []*bufio.Scanner
@@ -174,28 +135,30 @@ func newFileMergeReader(fs fs.Filesystem, segments []string) (io.Reader, error) 
 func (r *mergeReader) Read(p []byte) (int, error) {
 	// Pick the source with the smallest ID.
 	// TODO(pb): could be improved with an e.g. tournament tree
-	chosen := -1 // index
+	smallest := -1 // index
 	for i := range r.id {
 		if !r.ok[i] {
 			continue // already drained
 		}
-		if chosen < 0 || bytes.Compare(r.id[i], r.id[chosen]) < 0 {
-			chosen = i
+		if smallest < 0 || bytes.Compare(r.id[i], r.id[smallest]) < 0 {
+			smallest = i
 		}
 	}
-	if chosen < 0 {
+	if smallest < 0 {
 		return 0, io.EOF // everything is drained
 	}
 
 	// Copy the record over.
-	src := append(r.record[chosen], '\n')
+	src := append(r.record[smallest], '\n')
 	n := copy(p, src)
 	if n < len(src) {
 		panic("short read!") // TODO(pb): obviously needs fixing
 	}
 
 	// Advance the chosen source.
-	r.advance(chosen)
+	if err := r.advance(smallest); err != nil {
+		return n, errors.Wrapf(err, "advancing reader %d", smallest)
+	}
 
 	// One read is complete.
 	return n, nil

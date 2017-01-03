@@ -51,52 +51,6 @@ func TestBatchSegments(t *testing.T) {
 	}
 }
 
-func TestSequentialReader(t *testing.T) {
-	for _, testcase := range []struct {
-		input [][]string
-		want  []string
-	}{
-		{
-			[][]string{},
-			[]string{},
-		},
-		{
-			[][]string{{"A"}},
-			[]string{"A"},
-		},
-		{
-			[][]string{{"A"}, {"B"}},
-			[]string{"A", "B"},
-		},
-		{
-			[][]string{{"A", "B", "C"}, {"D"}, {"E", "F", "G"}},
-			[]string{"A", "B", "C", "D", "E", "F", "G"},
-		},
-	} {
-		// Convert string slice to a set of readers.
-		readers := make([]io.Reader, len(testcase.input))
-		for i, s := range testcase.input {
-			segment := strings.Join(s, "\n") + "\n"
-			readers[i] = strings.NewReader(segment)
-		}
-
-		// Construct the sequential reader from the set of readers.
-		r := sequentialReader(readers)
-
-		// Take lines from the sequential reader until EOF.
-		have := []string{}
-		s := bufio.NewScanner(r)
-		for s.Scan() {
-			have = append(have, s.Text())
-		}
-
-		// Make sure we got what we want!
-		if want := testcase.want; !reflect.DeepEqual(want, have) {
-			t.Errorf("%v: want %v, have %v", testcase.input, want, have)
-		}
-	}
-}
-
 func TestMergeReader(t *testing.T) {
 	var (
 		u100 = ulid.MustNew(100, nil).String()
