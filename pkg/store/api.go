@@ -174,11 +174,11 @@ func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request, statsO
 	)
 	var engine QueryEngine
 	switch strings.ToLower(engineStr) {
-	case "naïve", "naive", "":
+	case "naïve", "naive":
 		engine = QueryEngineNaïve
 	case "ripgrep", "rg":
 		engine = QueryEngineRipgrep
-	case "lazy":
+	case "lazy", "":
 		engine = QueryEngineLazy
 	default:
 		http.Error(w, fmt.Sprintf("unsupported engine %s", engineStr), http.StatusBadRequest)
