@@ -407,7 +407,14 @@ func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, s
 		toBytes   = []byte(to.String())
 	)
 
-	// Build the filters, including compiling the regex, if applicable.
+	// The batch reader sets up an optimized K-way merge.
+	batchReader, err := newBatchReader(log.fs, segments)
+	if err != nil {
+		return QueryResult{}, err
+	}
+
+	// The filter reader strips out records that are too old,
+	// too new, or don't match the (optional) query expression.
 	filters := []func([]byte) bool{
 		func(b []byte) bool { return bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 },
 		func(b []byte) bool { return bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 },
@@ -419,14 +426,6 @@ func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, s
 		}
 		filters = append(filters, func(b []byte) bool { return re.Match(b) })
 	}
-
-	// The batch reader sets up an optimized K-way merge.
-	batchReader, err := newBatchReader(log.fs, segments)
-	if err != nil {
-		return QueryResult{}, err
-	}
-
-	// The filter reader applies the filters to the results.
 	filterReader := newRecordFilteringReader(batchReader, filters...)
 
 	// TODO(pb): statsOnly requires a different code path altogether
