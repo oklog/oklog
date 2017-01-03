@@ -6,9 +6,10 @@ import (
 	"io"
 	"strings"
 
+	"github.com/pkg/errors"
+
 	"github.com/oklog/prototype/pkg/fs"
 	"github.com/oklog/ulid"
-	"github.com/pkg/errors"
 )
 
 // newBatchReader converts a batch of segment files to a single io.Reader.
