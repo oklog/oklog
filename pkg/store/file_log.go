@@ -402,31 +402,16 @@ func (log *fileLog) queryRipgrep(segments []string, from, to ulid.ULID, q string
 // We build up the chain of readers and return a result quite quickly.
 // Costs are deferred to whoever reads the QueryResult Records.
 func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
-	var (
-		fromBytes = []byte(from.String())
-		toBytes   = []byte(to.String())
-	)
-
 	// The batch reader sets up an optimized K-way merge.
 	batchReader, err := newBatchReader(log.fs, segments)
 	if err != nil {
 		return QueryResult{}, err
 	}
 
-	// The filter reader strips out records that are too old,
-	// too new, or don't match the (optional) query expression.
-	filters := []func([]byte) bool{
-		func(b []byte) bool { return bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 },
-		func(b []byte) bool { return bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 },
+	filterReader, err := newRecordFilteringReader(batchReader, from, to, q)
+	if err != nil {
+		return QueryResult{}, err
 	}
-	if q != "" {
-		re, err := regexp.Compile(q)
-		if err != nil {
-			return QueryResult{}, err
-		}
-		filters = append(filters, func(b []byte) bool { return re.Match(b) })
-	}
-	filterReader := newRecordFilteringReader(batchReader, filters...)
 
 	// TODO(pb): statsOnly requires a different code path altogether
 

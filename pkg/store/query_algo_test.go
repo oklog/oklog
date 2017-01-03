@@ -3,8 +3,10 @@ package store
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -135,55 +137,74 @@ func TestMergeReader(t *testing.T) {
 func TestRecordFilteringReader(t *testing.T) {
 	t.Parallel()
 
-	input := "1\n22\n333\n4444\n55555"
-	for i, testcase := range []struct {
-		name    string
-		filters []func([]byte) bool
-		want    []string
+	var input bytes.Buffer
+	for i := 0; i < 5; i++ {
+		id := ulid.MustNew(uint64(i), nil)
+		fmt.Fprintln(&input, id, strconv.Itoa(i))
+	}
+
+	// Takes records from the filtering reader until EOF.
+	records := func(r io.Reader) []string {
+		have := []string{}
+		s := bufio.NewScanner(r)
+		for s.Scan() {
+			have = append(have, strings.Fields(s.Text())[1])
+		}
+		return have
+	}
+
+	for _, testcase := range []struct {
+		name     string
+		from, to ulid.ULID
+		q        string
+		want     []string
+		err      error
 	}{
 		{
-			name:    "no filters",
-			filters: nil,
-			want:    []string{"1", "22", "333", "4444", "55555"},
+			name: "all",
+			from: ulid.MustNew(0, nil),
+			to:   ulid.MustNew(ulid.MaxTime(), nil),
+			want: []string{"0", "1", "2", "3", "4"},
 		},
 		{
-			name:    "pass one",
-			filters: []func([]byte) bool{func(b []byte) bool { return bytes.Equal(bytes.TrimSpace(b), []byte("1")) }},
-			want:    []string{"1"},
+			name: "some",
+			from: ulid.MustNew(1, nil),
+			to:   ulid.MustNew(3, nil),
+			want: []string{"1", "2", "3"},
 		},
 		{
-			name:    "fail one",
-			filters: []func([]byte) bool{func(b []byte) bool { return !strings.HasPrefix(string(b), "1") }},
-			want:    []string{"22", "333", "4444", "55555"},
+			name: "some matching query",
+			from: ulid.MustNew(1, nil),
+			to:   ulid.MustNew(3, nil),
+			q:    "1|3",
+			want: []string{"1", "3"},
 		},
 		{
-			name:    "pass some",
-			filters: []func([]byte) bool{func(b []byte) bool { return len(bytes.TrimSpace(b))%2 == 1 }},
-			want:    []string{"1", "333", "55555"},
+			name: "none",
+			from: ulid.MustNew(0, nil),
+			to:   ulid.MustNew(ulid.MaxTime(), nil),
+			q:    "6",
+			want: []string{},
 		},
 		{
-			name: "filters have AND semantics",
-			filters: []func([]byte) bool{
-				func(b []byte) bool { return len(bytes.TrimSpace(b))%2 == 1 },     // 1, 333, 55555
-				func(b []byte) bool { return !strings.HasPrefix(string(b), "1") }, // 22, 333, 4444, 55555
-			},
-			want: []string{"333", "55555"},
+			name: "query doesn't match record ids",
+			from: ulid.MustNew(0, nil),
+			to:   ulid.MustNew(ulid.MaxTime(), nil),
+			q:    ulid.MustNew(0, nil).String(),
+			want: []string{},
 		},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
 			// Build the filtering reader.
-			r := newRecordFilteringReader(strings.NewReader(input), testcase.filters...)
-
-			// Take lines from the filtering reader until EOF.
-			have := []string{}
-			s := bufio.NewScanner(r)
-			for s.Scan() {
-				have = append(have, s.Text())
+			in := bytes.NewReader(input.Bytes())
+			r, err := newRecordFilteringReader(in, testcase.from, testcase.to, testcase.q)
+			if want, have := testcase.err, err; !reflect.DeepEqual(want, have) {
+				t.Errorf("want error %v, have %v", want, have)
 			}
 
 			// Make sure we got what we want!
-			if want := testcase.want; !reflect.DeepEqual(want, have) {
-				t.Errorf("%d: want %v, have %v", i, want, have)
+			if want, have := testcase.want, records(r); !reflect.DeepEqual(want, have) {
+				t.Errorf("want %v, have %v", want, have)
 			}
 		})
 	}

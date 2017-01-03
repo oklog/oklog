@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -184,28 +185,33 @@ func (r *mergeReader) advance(i int) error {
 }
 
 type recordFilteringReader struct {
-	s       *bufio.Scanner
-	filters []func([]byte) bool // AND semantics
+	r        *bufio.Reader
+	q        *regexp.Regexp
+	from, to []byte
 }
 
-func newRecordFilteringReader(r io.Reader, filters ...func([]byte) bool) io.Reader {
-	return recordFilteringReader{
-		s:       bufio.NewScanner(r),
-		filters: filters,
+func newRecordFilteringReader(r io.Reader, from, to ulid.ULID, q string) (_ io.Reader, err error) {
+	fr := recordFilteringReader{
+		r:    bufio.NewReader(r),
+		from: []byte(from.String()),
+		to:   []byte(to.String()),
 	}
+	fr.q, err = regexp.Compile(q)
+	return fr, err
 }
 
 func (r recordFilteringReader) Read(p []byte) (int, error) {
 	for {
 		// Take the next record.
-		if !r.s.Scan() {
-			return 0, io.EOF
+		rec, err := r.r.ReadSlice('\n')
+		if err != nil {
+			return 0, err
 		}
 
 		// If it passes, write and return.
-		if b := append(r.s.Bytes(), '\n'); r.pass(b) {
-			n := copy(p, b)
-			if n < len(b) {
+		if r.pass(rec) {
+			n := copy(p, rec)
+			if n < len(rec) {
 				panic("short read!") // TODO(pb): obviously needs fixing
 			}
 			return n, nil
@@ -214,10 +220,7 @@ func (r recordFilteringReader) Read(p []byte) (int, error) {
 }
 
 func (r recordFilteringReader) pass(b []byte) bool {
-	for _, f := range r.filters {
-		if !f(b) { // any failure = complete failure
-			return false
-		}
-	}
-	return true
+	id, body := b[:ulid.EncodedSize], b[ulid.EncodedSize+1:]
+	return bytes.Compare(id, r.from) >= 0 &&
+		bytes.Compare(id, r.to) <= 0 && r.q.Match(body)
 }
