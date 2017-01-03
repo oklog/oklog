@@ -45,7 +45,7 @@ func batchSegments(segments []string) [][]string {
 	ranges := make([]lexrange, len(segments))
 	for i := range segments {
 		f := strings.SplitN(basename(segments[i]), "-", 2)
-		ranges[i] = struct{ a, b string }{f[0], f[1]}
+		ranges[i] = lexrange{f[0], f[1]}
 	}
 
 	// Now, walk the segments.
