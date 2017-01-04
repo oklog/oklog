@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -132,6 +134,87 @@ func TestMergeReader(t *testing.T) {
 			}
 		})
 	}
+}
+
+// NOTE(tsenart): Profiling the benchmark with already generated test data yields
+// more meaningful and easy to understand results.
+
+//   go test -c
+//   ./store.test -test.run=XXX -test.benchmem -test.cpuprofile=out -test.bench=MergeReader
+//   go tool pprof -web store.test out
+func BenchmarkMergeReader(b *testing.B) {
+	b.StopTimer()
+
+	const size = 32 * 1024 * 1024
+	r, err := newMergeReader(generateSegments(b, 128, size, "testdata"))
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	p := make([]byte, 4096)
+
+	b.ResetTimer()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		r.Read(p)
+	}
+}
+
+func generateSegments(b testing.TB, count, size int, datadir string) (segs []io.Reader) {
+	matches, err := filepath.Glob(filepath.Join(datadir, "*.segment"))
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	for _, segment := range matches {
+		f, err := os.Open(segment)
+		if err != nil {
+			b.Fatal(err)
+		}
+		segs = append(segs, f)
+	}
+
+	if len(segs) > 0 {
+		return segs
+	}
+
+	ts := uint64(0)
+	body := append(bytes.Repeat([]byte("0"), 512), '\n')
+	record := make([]byte, ulid.EncodedSize+1+len(body))
+	record[ulid.EncodedSize] = ' '
+	copy(record[ulid.EncodedSize+1:], body)
+
+	buf := bytes.NewBuffer(make([]byte, 0, size))
+	for i := 0; i < count; i++ {
+		from := ulid.MustNew(ts, nil)
+		hi := ts
+		for buf.Len() < size {
+			ulid.MustNew(hi, nil).MarshalTextTo(record[:ulid.EncodedSize])
+			_, err := buf.Write(record)
+			if err != nil {
+				b.Fatal(err)
+			}
+			hi++
+		}
+
+		to := ulid.MustNew(hi, nil)
+		name := filepath.Join(datadir, fmt.Sprintf("%s-%s.segment", from, to))
+		f, err := os.Create(name)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		if _, err = buf.WriteTo(f); err != nil {
+			b.Fatal(err)
+		}
+
+		buf.Reset()
+		segs = append(segs, f)
+		ts = hi
+
+	}
+
+	return segs
 }
 
 func TestRecordFilteringReader(t *testing.T) {
