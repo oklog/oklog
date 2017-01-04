@@ -109,8 +109,13 @@ func newMergeReader(readers []io.Reader) (io.Reader, error) {
 	}
 
 	// Initialize all of the scanners and their first record.
+	const (
+		scanBufferSize   = 64 * 1024      // 64KB
+		scanMaxTokenSize = scanBufferSize // if equal, no allocs
+	)
 	for i := 0; i < len(readers); i++ {
 		r.scanner[i] = bufio.NewScanner(readers[i])
+		r.scanner[i].Buffer(make([]byte, scanBufferSize), scanMaxTokenSize)
 		if err := r.advance(i); err != nil {
 			return nil, err
 		}
