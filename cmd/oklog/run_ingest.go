@@ -39,7 +39,7 @@ func runIngest(args []string) error {
 		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", 32*1024*1024, "flush segments after they grow to this size")
 		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
 		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
-		filesystem            = flagset.String("filesystem", "real", "real, virtual, nop")
+		filesystem            = flagset.String("filesystem", "real", "real, real-mmap, virtual, nop")
 		clusterPeers          = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
@@ -189,7 +189,9 @@ func runIngest(args []string) error {
 	var fsys fs.Filesystem
 	switch strings.ToLower(*filesystem) {
 	case "real":
-		fsys = fs.NewRealFilesystem()
+		fsys = fs.NewRealFilesystem(false)
+	case "real-mmap":
+		fsys = fs.NewRealFilesystem(true)
 	case "virtual":
 		fsys = fs.NewVirtualFilesystem()
 	case "nop":

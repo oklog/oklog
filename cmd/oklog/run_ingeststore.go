@@ -40,7 +40,7 @@ func runIngestStore(args []string) error {
 		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", 2, "how many copies of each segment to replicate")
 		segmentRetain            = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
 		segmentPurge             = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
-		filesystem               = flagset.String("filesystem", "real", "real, virtual, nop")
+		filesystem               = flagset.String("filesystem", "real", "real, real-mmap, virtual, nop")
 		clusterPeers             = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
@@ -244,7 +244,9 @@ func runIngestStore(args []string) error {
 	var fsys fs.Filesystem
 	switch strings.ToLower(*filesystem) {
 	case "real":
-		fsys = fs.NewRealFilesystem()
+		fsys = fs.NewRealFilesystem(false)
+	case "real-mmap":
+		fsys = fs.NewRealFilesystem(true)
 	case "virtual":
 		fsys = fs.NewVirtualFilesystem()
 	case "nop":

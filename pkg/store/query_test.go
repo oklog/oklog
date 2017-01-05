@@ -24,7 +24,7 @@ func testQueryEngine(t *testing.T, engine QueryEngine) {
 
 	var logs []Log
 	for _, root := range strings.Fields(storeRoots) {
-		log, err := NewFileLog(fs.NewRealFilesystem(), root, 1000000)
+		log, err := NewFileLog(fs.NewRealFilesystem(false), root, 1000000)
 		if err != nil {
 			t.Fatalf("%s: %v", root, err)
 		}
