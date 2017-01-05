@@ -136,31 +136,31 @@ func TestMergeReader(t *testing.T) {
 	}
 }
 
-// NOTE(tsenart): Profiling the benchmark with already generated test data yields
-// more meaningful and easy to understand results.
-
-//   go test -c
+// NOTE(tsenart): Profiling the benchmark with already generated test data
+// yields more meaningful and easy to understand results.
+//
+//   go test -c ./pkg/store
 //   ./store.test -test.run=XXX -test.benchmem -test.cpuprofile=out -test.bench=MergeReader
 //   go tool pprof -web store.test out
+//
 func BenchmarkMergeReader(b *testing.B) {
-	b.StopTimer()
-
 	const size = 32 * 1024 * 1024
-	r, err := newMergeReader(generateSegments(b, 128, size, "testdata"))
+	r, err := newMergeReader(generateSegments(b, 128, size, "testdata/segments"))
 	if err != nil {
 		b.Fatal(err)
 	}
-
 	p := make([]byte, 4096)
-
+	b.ReportAllocs()
 	b.ResetTimer()
-	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		r.Read(p)
 	}
 }
 
 func generateSegments(b testing.TB, count, size int, datadir string) (segs []io.Reader) {
+	if err := os.MkdirAll(datadir, 0755); err != nil {
+		b.Fatal(err)
+	}
 	matches, err := filepath.Glob(filepath.Join(datadir, "*.segment"))
 	if err != nil {
 		b.Fatal(err)
@@ -173,7 +173,6 @@ func generateSegments(b testing.TB, count, size int, datadir string) (segs []io.
 		}
 		segs = append(segs, f)
 	}
-
 	if len(segs) > 0 {
 		return segs
 	}
@@ -211,7 +210,6 @@ func generateSegments(b testing.TB, count, size int, datadir string) (segs []io.
 		buf.Reset()
 		segs = append(segs, f)
 		ts = hi
-
 	}
 
 	return segs
