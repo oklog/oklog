@@ -128,6 +128,7 @@ func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
 				continue
 			}
 			w.Write(line)
+			w.Write([]byte{'\n'})
 		}
 	}()
 	return r
