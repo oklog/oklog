@@ -48,7 +48,7 @@ func (qr *QueryResult) EncodeTo(w http.ResponseWriter) {
 	w.Header().Set(httpHeaderRecordsQueried, strconv.Itoa(qr.RecordsQueried))
 	w.Header().Set(httpHeaderRecordsMatched, strconv.Itoa(qr.RecordsMatched))
 	if qr.Records != nil {
-		io.Copy(w, qr.Records)
+		io.Copy(w, qr.Records) // TODO(pb): CopyBuffer
 		qr.Records.Close()
 	}
 }
