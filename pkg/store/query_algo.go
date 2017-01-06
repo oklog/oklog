@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/djherbis/buffer"
+	"github.com/djherbis/nio"
 	"github.com/pkg/errors"
 
 	"github.com/oklog/prototype/pkg/fs"
@@ -115,10 +117,9 @@ func makeConcurrentFilteringReaders(fs fs.Filesystem, segments []string, pass re
 }
 
 func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
-	r, w := io.Pipe()
+	r, w := nio.Pipe(buffer.New(32 * 1024 * 1024))
+	//r, w := io.Pipe()
 	go func() {
-		var p, f int64
-		defer func() { println("### pass", p, "fail", f) }()
 		br := bufio.NewReader(src)
 		for {
 			line, err := br.ReadSlice('\n')
@@ -127,10 +128,7 @@ func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
 				return
 			}
 			if !pass(line) {
-				f++
 				continue
-			} else {
-				p++
 			}
 			if n, err := w.Write(line); err != nil {
 				w.CloseWithError(err)
