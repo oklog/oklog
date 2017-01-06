@@ -27,6 +27,7 @@ func (realFilesystem) Create(path string) (File, error) {
 	return realFile{
 		File:   f,
 		Reader: f,
+		Closer: f,
 	}, err
 }
 
@@ -38,6 +39,7 @@ func (fs realFilesystem) Open(path string) (File, error) {
 	rf := realFile{
 		File:   f,
 		Reader: f,
+		Closer: f,
 	}
 	if fs.mmap {
 		r, err := mmap.New(f)
@@ -45,6 +47,7 @@ func (fs realFilesystem) Open(path string) (File, error) {
 			return nil, err
 		}
 		rf.Reader = ioext.OffsetReader(r, 0)
+		rf.Closer = multiCloser{r, f}
 	}
 	return rf, nil
 }
@@ -77,10 +80,15 @@ func (realFilesystem) Walk(root string, walkFn filepath.WalkFunc) error {
 type realFile struct {
 	*os.File
 	io.Reader
+	io.Closer
 }
 
 func (f realFile) Read(p []byte) (int, error) {
 	return f.Reader.Read(p)
+}
+
+func (f realFile) Close() error {
+	return f.Closer.Close()
 }
 
 func (f realFile) Size() int64 {
@@ -89,4 +97,15 @@ func (f realFile) Size() int64 {
 		panic(err)
 	}
 	return fi.Size()
+}
+
+type multiCloser []io.Closer
+
+func (mc multiCloser) Close() error {
+	for _, c := range mc {
+		if err := c.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
