@@ -409,22 +409,19 @@ func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, s
 	}
 
 	// Build the record filter.
-	fromBytes, toBytes := from[:], to[:]
+	fromBytes, _ := from.MarshalText()
+	toBytes, _ := to.MarshalText()
 	pass := func(b []byte) bool {
 		if len(b) < ulid.EncodedSize {
-			println("### short")
 			return false
 		}
 		if bytes.Compare(b[:ulid.EncodedSize], fromBytes) < 0 {
-			println("### old")
 			return false
 		}
 		if bytes.Compare(b[:ulid.EncodedSize], toBytes) > 0 {
-			println("### new")
 			return false
 		}
 		if !re.Match(b[ulid.EncodedSize+1:]) {
-			println("### nomatch")
 			return false
 		}
 		return true
