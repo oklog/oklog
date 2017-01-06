@@ -12,8 +12,8 @@ import (
 
 const mkdirAllMode = 0755
 
-// NewRealFilesystem yields a real disk filesystem with optional memory
-// mapping for file reading.
+// NewRealFilesystem yields a real disk filesystem
+// with optional memory mapping for file reading.
 func NewRealFilesystem(mmap bool) Filesystem {
 	return realFilesystem{mmap: mmap}
 }
@@ -24,7 +24,10 @@ type realFilesystem struct {
 
 func (realFilesystem) Create(path string) (File, error) {
 	f, err := os.Create(path)
-	return &realFile{File: f}, err
+	return realFile{
+		File:   f,
+		Reader: f,
+	}, err
 }
 
 func (fs realFilesystem) Open(path string) (File, error) {
@@ -32,16 +35,17 @@ func (fs realFilesystem) Open(path string) (File, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	rf := &realFile{File: f}
+	rf := realFile{
+		File:   f,
+		Reader: f,
+	}
 	if fs.mmap {
 		r, err := mmap.New(f)
 		if err != nil {
 			return nil, err
 		}
-		rf.r = ioext.OffsetReader(r, 0)
+		rf.Reader = ioext.OffsetReader(r, 0)
 	}
-
 	return rf, nil
 }
 
@@ -71,15 +75,12 @@ func (realFilesystem) Walk(root string, walkFn filepath.WalkFunc) error {
 }
 
 type realFile struct {
-	r io.Reader
 	*os.File
+	io.Reader
 }
 
-func (f *realFile) Read(p []byte) (int, error) {
-	if f.r != nil {
-		return f.r.Read(p)
-	}
-	return f.File.Read(p)
+func (f realFile) Read(p []byte) (int, error) {
+	return f.Reader.Read(p)
 }
 
 func (f realFile) Size() int64 {
