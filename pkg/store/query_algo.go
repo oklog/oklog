@@ -37,11 +37,11 @@ func newQueryReader(fs fs.Filesystem, segments []string, pass recordFilter) (io.
 			// A batch of N requires a K-way merge.
 			readers, err := makeConcurrentFilteringReaders(fs, batch, pass)
 			if err != nil {
-				return nil, err
+				return nil, err // TODO(pb): don't leak FDs
 			}
 			r, err := newMergeReader(readers)
 			if err != nil {
-				return nil, err
+				return nil, err // TODO(pb): don't leak FDs
 			}
 			readers = append(readers, r)
 		}
@@ -117,6 +117,8 @@ func makeConcurrentFilteringReaders(fs fs.Filesystem, segments []string, pass re
 func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
 	r, w := io.Pipe()
 	go func() {
+		var p, f int64
+		defer func() { println("### pass", p, "fail", f) }()
 		br := bufio.NewReader(src)
 		for {
 			line, err := br.ReadSlice('\n')
@@ -125,9 +127,18 @@ func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
 				return
 			}
 			if !pass(line) {
+				f++
 				continue
+			} else {
+				p++
 			}
-			w.Write(line)
+			if n, err := w.Write(line); err != nil {
+				w.CloseWithError(err)
+				return
+			} else if n < len(line) {
+				w.CloseWithError(io.ErrShortWrite)
+				return
+			}
 		}
 	}()
 	return r

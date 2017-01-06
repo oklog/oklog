@@ -414,7 +414,7 @@ func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, s
 
 	// Build the record filter.
 	fromBytes, toBytes := from[:], to[:]
-	filter := func(b []byte) bool {
+	pass := func(b []byte) bool {
 		return len(b) > ulid.EncodedSize &&
 			bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 &&
 			bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 &&
@@ -422,7 +422,7 @@ func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, s
 	}
 
 	// Build the lazy reader.
-	r, err := newQueryReader(log.fs, segments, filter)
+	r, err := newQueryReader(log.fs, segments, pass)
 	if err != nil {
 		return QueryResult{}, err
 	}
