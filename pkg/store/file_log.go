@@ -402,13 +402,27 @@ func (log *fileLog) queryRipgrep(segments []string, from, to ulid.ULID, q string
 // We build up the chain of readers and return a result quite quickly.
 // Costs are deferred to whoever reads the QueryResult Records.
 func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
-	// The batch reader sets up an optimized K-way merge.
-	batchReader, err := newBatchReader(log.fs, segments)
-	if err != nil {
-		return QueryResult{}, err
+	// Build the query matcher.
+	matchQuery := func([]byte) bool { return true }
+	if q != "" {
+		re, err := regexp.Compile(q)
+		if err != nil {
+			return QueryResult{}, err
+		}
+		matchQuery = func(b []byte) bool { return re.Match(b[ulid.EncodedSize+1:]) }
 	}
 
-	filterReader, err := newRecordFilteringReader(batchReader, from, to, q)
+	// Build the record filter.
+	fromBytes, toBytes := from[:], to[:]
+	filter := func(b []byte) bool {
+		return len(b) > ulid.EncodedSize &&
+			bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 &&
+			bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 &&
+			matchQuery(b)
+	}
+
+	// Build the lazy reader.
+	r, err := newQueryReader(log.fs, segments, filter)
 	if err != nil {
 		return QueryResult{}, err
 	}
@@ -424,7 +438,7 @@ func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, s
 		SegmentsQueried: len(segments),
 		RecordsQueried:  -1,
 		RecordsMatched:  -1,
-		Records:         ioutil.NopCloser(filterReader),
+		Records:         ioutil.NopCloser(r),
 	}, nil
 }
 

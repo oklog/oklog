@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"io"
-	"regexp"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -13,28 +12,39 @@ import (
 	"github.com/oklog/ulid"
 )
 
-// newBatchReader converts a batch of segment files to a single io.Reader.
+type recordFilter func([]byte) bool
+
+// newQueryReader converts a batch of segment files to a single io.Reader.
 // Records are yielded in time order, oldest first, hopefully efficiently!
-func newBatchReader(fs fs.Filesystem, segments []string) (io.Reader, error) {
+// Only records passing the recordFilter are yielded.
+func newQueryReader(fs fs.Filesystem, segments []string, pass recordFilter) (io.Reader, error) {
 	// Batch the segments, and construct a reader for each batch.
 	var readers []io.Reader
 	for _, batch := range batchSegments(segments) {
-		var (
-			r   io.Reader
-			err error
-		)
 		switch len(batch) {
 		case 0:
 			continue // weird
+
 		case 1:
-			r, err = fs.Open(batch[0]) // optimization!
+			// A batch of one can be read straight thru.
+			f, err := fs.Open(batch[0])
+			if err != nil {
+				return nil, err // TODO(pb): don't leak FDs
+			}
+			readers = append(readers, newConcurrentFilteringReader(f, pass))
+
 		default:
-			r, err = newFileMergeReader(fs, batch)
+			// A batch of N requires a K-way merge.
+			readers, err := makeConcurrentFilteringReaders(fs, batch, pass)
+			if err != nil {
+				return nil, err
+			}
+			r, err := newMergeReader(readers)
+			if err != nil {
+				return nil, err
+			}
+			readers = append(readers, r)
 		}
-		if err != nil {
-			return nil, err
-		}
-		readers = append(readers, r)
 	}
 
 	// The MultiReader drains each reader in sequence.
@@ -92,7 +102,38 @@ func max(a, b string) string {
 	return b
 }
 
+func makeConcurrentFilteringReaders(fs fs.Filesystem, segments []string, pass recordFilter) ([]io.Reader, error) {
+	readers := make([]io.Reader, len(segments))
+	for i := range segments {
+		f, err := fs.Open(segments[i])
+		if err != nil {
+			return nil, err // TODO(pb): don't leak FDs
+		}
+		readers[i] = newConcurrentFilteringReader(f, pass)
+	}
+	return readers, nil
+}
+
+func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
+	r, w := io.Pipe()
+	go func() {
+		br := bufio.NewReader(r)
+		for {
+			line, err := br.ReadSlice('\n')
+			if err != nil {
+				return
+			}
+			if !pass(line) {
+				return
+			}
+			w.Write(line)
+		}
+	}()
+	return r
+}
+
 // mergeReader performs a K-way merge from multiple readers.
+// TODO(pb): the readers need to be closed; wire that thru
 type mergeReader struct {
 	scanner []*bufio.Scanner
 	ok      []bool
@@ -124,19 +165,6 @@ func newMergeReader(readers []io.Reader) (io.Reader, error) {
 
 	// Ready to read.
 	return r, nil
-}
-
-func newFileMergeReader(fs fs.Filesystem, segments []string) (io.Reader, error) {
-	// Convert segments to io.Readers via the filesystem.
-	readers := make([]io.Reader, len(segments))
-	for i := range segments {
-		r, err := fs.Open(segments[i])
-		if err != nil {
-			return nil, err
-		}
-		readers[i] = r
-	}
-	return newMergeReader(readers)
 }
 
 func (r *mergeReader) Read(p []byte) (int, error) {
@@ -182,45 +210,4 @@ func (r *mergeReader) advance(i int) error {
 		return err
 	}
 	return nil
-}
-
-type recordFilteringReader struct {
-	r        *bufio.Reader
-	q        *regexp.Regexp
-	from, to []byte
-}
-
-func newRecordFilteringReader(r io.Reader, from, to ulid.ULID, q string) (_ io.Reader, err error) {
-	fr := recordFilteringReader{
-		r:    bufio.NewReader(r),
-		from: []byte(from.String()),
-		to:   []byte(to.String()),
-	}
-	fr.q, err = regexp.Compile(q)
-	return fr, err
-}
-
-func (r recordFilteringReader) Read(p []byte) (int, error) {
-	for {
-		// Take the next record.
-		rec, err := r.r.ReadSlice('\n')
-		if err != nil {
-			return 0, err
-		}
-
-		// If it passes, write and return.
-		if r.pass(rec) {
-			n := copy(p, rec)
-			if n < len(rec) {
-				panic("short read!") // TODO(pb): obviously needs fixing
-			}
-			return n, nil
-		}
-	}
-}
-
-func (r recordFilteringReader) pass(b []byte) bool {
-	id, body := b[:ulid.EncodedSize], b[ulid.EncodedSize+1:]
-	return bytes.Compare(id, r.from) >= 0 &&
-		bytes.Compare(id, r.to) <= 0 && r.q.Match(body)
 }
