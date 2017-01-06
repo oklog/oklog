@@ -22,6 +22,7 @@ func runQuery(args []string) error {
 		q         = flagset.String("q", "", "query expression")
 		engine    = flagset.String("engine", "lazy", "naïve, ripgrep, lazy")
 		stats     = flagset.Bool("stats", false, "statistics only, no records")
+		nocopy    = flagset.Bool("nocopy", false, "don't read the response body")
 	)
 	if err := flagset.Parse(args); err != nil {
 		return err
@@ -97,7 +98,10 @@ func runQuery(args []string) error {
 	fmt.Fprintf(os.Stderr, "%d record(s) matched\n", result.RecordsMatched)
 	fmt.Fprintf(os.Stderr, "%d error(s)\n", result.ErrorCount)
 
-	io.Copy(os.Stdout, result.Records)
+	if !*nocopy {
+		io.Copy(os.Stdout, result.Records)
+	}
 	result.Records.Close()
+
 	return nil
 }
