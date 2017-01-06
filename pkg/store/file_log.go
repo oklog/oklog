@@ -403,14 +403,15 @@ func (log *fileLog) queryRipgrep(segments []string, from, to ulid.ULID, q string
 // Costs are deferred to whoever reads the QueryResult Records.
 func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
 	// Build the regex.
-	re, err := regexp.Compile(q)
-	if err != nil {
-		return QueryResult{}, err
-	}
+	//re, err := regexp.Compile(q)
+	//if err != nil {
+	//	return QueryResult{}, err
+	//}
 
 	// Build the record filter.
 	fromBytes, _ := from.MarshalText()
 	toBytes, _ := to.MarshalText()
+	qBytes := []byte(q)
 	pass := func(b []byte) bool {
 		if len(b) < ulid.EncodedSize {
 			return false
@@ -421,7 +422,8 @@ func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, s
 		if bytes.Compare(b[:ulid.EncodedSize], toBytes) > 0 {
 			return false
 		}
-		if !re.Match(b[ulid.EncodedSize+1:]) {
+		//if !re.Match(b[ulid.EncodedSize+1:]) {
+		if !bytes.Contains(b[ulid.EncodedSize+1:], qBytes) {
 			return false
 		}
 		return true
