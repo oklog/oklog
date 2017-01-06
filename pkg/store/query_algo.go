@@ -117,7 +117,7 @@ func makeConcurrentFilteringReaders(fs fs.Filesystem, segments []string, pass re
 }
 
 func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
-	r, w := nio.Pipe(buffer.New(32 * 1024 * 1024))
+	r, w := nio.Pipe(buffer.New(1024 * 1024))
 	//r, w := io.Pipe()
 	go func() {
 		br := bufio.NewReader(src)

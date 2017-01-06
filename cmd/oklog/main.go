@@ -35,6 +35,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	//runtime.SetBlockProfileRate(1)
+
 	var run func([]string) error
 	switch strings.ToLower(os.Args[1]) {
 	case "forward":
