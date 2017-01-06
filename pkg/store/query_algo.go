@@ -121,10 +121,11 @@ func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
 		for {
 			line, err := br.ReadSlice('\n')
 			if err != nil {
+				w.CloseWithError(err)
 				return
 			}
 			if !pass(line) {
-				return
+				continue
 			}
 			w.Write(line)
 		}
