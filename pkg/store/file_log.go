@@ -402,14 +402,10 @@ func (log *fileLog) queryRipgrep(segments []string, from, to ulid.ULID, q string
 // We build up the chain of readers and return a result quite quickly.
 // Costs are deferred to whoever reads the QueryResult Records.
 func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
-	// Build the query matcher.
-	matchQuery := func([]byte) bool { return true }
-	if q != "" {
-		re, err := regexp.Compile(q)
-		if err != nil {
-			return QueryResult{}, err
-		}
-		matchQuery = func(b []byte) bool { return re.Match(b[ulid.EncodedSize+1:]) }
+	// Build the regex.
+	re, err := regexp.Compile(q)
+	if err != nil {
+		return QueryResult{}, err
 	}
 
 	// Build the record filter.
@@ -419,19 +415,20 @@ func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, s
 			println("### short")
 			return false
 		}
-		if !(bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0) {
+		if bytes.Compare(b[:ulid.EncodedSize], fromBytes) < 0 {
 			println("### old")
 			return false
 		}
-		if !(bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0) {
+		if bytes.Compare(b[:ulid.EncodedSize], toBytes) > 0 {
 			println("### new")
 			return false
 		}
-		if !matchQuery(b) {
+		if !re.Match(b[ulid.EncodedSize+1:]) {
 			println("### nomatch")
 			return false
 		}
 		return true
+
 		//return len(b) > ulid.EncodedSize &&
 		//	bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 &&
 		//	bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 &&
