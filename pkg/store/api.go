@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -135,6 +134,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 	c := make(chan response, len(requests))
 	for _, req := range requests {
 		go func(req *http.Request) {
+			// TODO(pb): don't use http.DefaultClient
 			resp, err := http.DefaultClient.Do(req)
 			c <- response{resp, err}
 		}(req)
@@ -145,10 +145,9 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 		responses[i] = <-c
 	}
 	result := QueryResult{
-		Engine: engine,
-		From:   from,
-		To:     to,
-		Q:      q,
+		From: from,
+		To:   to,
+		Q:    q,
 	}
 	for _, response := range responses {
 		if response.err != nil {
@@ -161,30 +160,22 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 		}
 		var partialResult QueryResult
 		partialResult.DecodeFrom(response.resp)
-		result.Merge(partialResult)
+		if err := result.Merge(partialResult); err != nil {
+			err = errors.Wrap(err, "merging results")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	result.EncodeTo(w)
 }
 
 func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request, statsOnly bool) {
 	var (
-		engineStr = r.URL.Query().Get("engine")
-		fromStr   = r.URL.Query().Get("from")
-		toStr     = r.URL.Query().Get("to")
-		q         = r.URL.Query().Get("q")
+		fromStr  = r.URL.Query().Get("from")
+		toStr    = r.URL.Query().Get("to")
+		q        = r.URL.Query().Get("q")
+		_, regex = r.URL.Query()["regex"]
 	)
-	var engine QueryEngine
-	switch strings.ToLower(engineStr) {
-	case "naïve", "naive":
-		engine = QueryEngineNaïve
-	case "ripgrep", "rg":
-		engine = QueryEngineRipgrep
-	case "lazy", "":
-		engine = QueryEngineLazy
-	default:
-		http.Error(w, fmt.Sprintf("unsupported engine %s", engineStr), http.StatusBadRequest)
-		return
-	}
 	from, err := time.Parse(time.RFC3339Nano, fromStr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -195,8 +186,7 @@ func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request, statsO
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	result, err := a.log.Query(engine, from, to, q, statsOnly)
+	result, err := a.log.Query(from, to, q, regex, statsOnly)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

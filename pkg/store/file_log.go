@@ -1,13 +1,10 @@
 package store
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -56,22 +53,13 @@ func (log *fileLog) Create() (WriteSegment, error) {
 	return &fileWriteSegment{log.fs, f}, nil
 }
 
-func (log *fileLog) Query(engine QueryEngine, from, to time.Time, q string, statsOnly bool) (QueryResult, error) {
+func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (QueryResult, error) {
 	var (
 		fromULID = ulid.MustNew(ulid.Timestamp(from), nil)
 		toULID   = ulid.MustNew(ulid.Timestamp(to), nil)
 		segments = log.queryMatchingSegments(fromULID, toULID)
 	)
-	switch engine {
-	case QueryEngineNaïve:
-		return log.queryNaïve(segments, fromULID, toULID, q, statsOnly)
-	case QueryEngineRipgrep:
-		return log.queryRipgrep(segments, fromULID, toULID, q, statsOnly)
-	case QueryEngineLazy:
-		return log.queryLazy(segments, fromULID, toULID, q, statsOnly)
-	default:
-		return QueryResult{}, errors.Errorf("unsupported engine %s", engine)
-	}
+	return log.queryLazy(segments, fromULID, toULID, q, regex, statsOnly)
 }
 
 func (log *fileLog) Overlapping() ([]ReadSegment, error) {
@@ -292,146 +280,20 @@ func (log *fileLog) Stats() (LogStats, error) {
 	return stats, nil
 }
 
-// queryNaïve does a blind K-way merge of matching segments into memory,
-// then per-record filtering for time boundaries and the query expression.
-// The returned Records io.Reader is just an in-memory buffer.
-func (log *fileLog) queryNaïve(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
-	re, err := regexp.Compile(q)
-	if err != nil {
-		return QueryResult{}, err
-	}
-
-	// Merge matching segments in a global time order.
-	var readers []io.Reader
-	for _, segment := range segments {
-		f, err := log.fs.Open(segment)
-		if err != nil {
-			continue
-		}
-		defer f.Close()
-		readers = append(readers, f)
-	}
-	var records bytes.Buffer
-	if _, _, _, err = mergeRecords(&records, readers...); err != nil {
-		return QueryResult{}, err
-	}
-
-	// Filter matching records.
-	var (
-		s              = bufio.NewScanner(&records)
-		filtered       = bytes.Buffer{}
-		recordsQueried = 0
-		recordsMatched = 0
-		fromBytes      = []byte(from.String())
-		toBytes        = []byte(to.String())
-	)
-	for s.Scan() {
-		recordsQueried++
-		b := s.Bytes()
-		if len(b) < ulid.EncodedSize {
-			continue // weird
-		}
-		id := b[:ulid.EncodedSize]
-		if bytes.Compare(id, fromBytes) < 0 {
-			continue
-		}
-		if bytes.Compare(id, toBytes) > 0 {
-			continue
-		}
-		if re.Match(b) {
-			recordsMatched++
-			filtered.Write(append(b, '\n'))
-		}
-	}
-	if statsOnly {
-		records.Reset()
-	} else {
-		records = filtered
-	}
-
-	// Return.
-	return QueryResult{
-		Engine:          string(QueryEngineNaïve),
-		From:            from.String(),
-		To:              to.String(),
-		Q:               q,
-		NodesQueried:    1,
-		SegmentsQueried: len(segments),
-		RecordsQueried:  recordsQueried,
-		RecordsMatched:  recordsMatched,
-		Records:         ioutil.NopCloser(&records),
-	}, nil
-}
-
-// queryRipgrep just shells out to ripgrep -- or cat, if no q is specified.
-// It doesn't accurately filter on time bounds, or ensure correct order.
-// It's here to serve as a "target" benchmark for other implementations.
-func (log *fileLog) queryRipgrep(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
-	var pipeline string
-	if q == "" {
-		pipeline = fmt.Sprintf("cat %s", strings.Join(segments, " "))
-	} else {
-		pipeline = fmt.Sprintf("rg -e %q %s", q, strings.Join(segments, " "))
-	}
-
-	// TODO(pb): need to filter out too-old and too-recent records
-
-	cmd := exec.Command("sh", "-c", pipeline)
-	var records bytes.Buffer
-	cmd.Stdout = &records
-	if err := cmd.Run(); err != nil {
-		return QueryResult{}, errors.Wrapf(err, "%s", pipeline)
-	}
-
-	// TODO(pb): statsOnly requires a different code path altogether
-
-	return QueryResult{
-		Engine:          string(QueryEngineRipgrep),
-		From:            from.String(),
-		To:              to.String(),
-		Q:               q,
-		NodesQueried:    1,
-		SegmentsQueried: len(segments),
-		RecordsQueried:  -1,
-		RecordsMatched:  -1,
-		Records:         ioutil.NopCloser(&records),
-	}, nil
-}
-
-// queryLazy is like naïve, but via lazy-evaluated (streaming) readers.
-// We build up the chain of readers and return a result quite quickly.
-// Costs are deferred to whoever reads the QueryResult Records.
-func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, statsOnly bool) (QueryResult, error) {
-	// Build the regex.
-	//re, err := regexp.Compile(q)
-	//if err != nil {
-	//	return QueryResult{}, err
-	//}
-
+// queryLazy returns results via lazy-evaluated (streaming) readers.
+// We build up the chain of readers and return a result quite quickly;
+// costs are deferred to whoever reads the QueryResult Records.
+func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, regex, statsOnly bool) (QueryResult, error) {
 	// Build the record filter.
-	fromBytes, _ := from.MarshalText()
-	toBytes, _ := to.MarshalText()
-	qBytes := []byte(q)
-	pass := func(b []byte) bool {
-		if len(b) < ulid.EncodedSize {
-			return false
+	var pass func([]byte) bool
+	if regex {
+		re, err := regexp.Compile(q)
+		if err != nil {
+			return QueryResult{}, err
 		}
-		if bytes.Compare(b[:ulid.EncodedSize], fromBytes) < 0 {
-			return false
-		}
-		if bytes.Compare(b[:ulid.EncodedSize], toBytes) > 0 {
-			return false
-		}
-		//if !re.Match(b[ulid.EncodedSize+1:]) {
-		if !bytes.Contains(b[ulid.EncodedSize+1:], qBytes) {
-			return false
-		}
-		return true
-
-		//return len(b) > ulid.EncodedSize &&
-		//	bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 &&
-		//	bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 &&
-		//	matchQuery(b)
+		pass = recordFilterRegex(from, to, re)
+	} else {
+		pass = recordFilterPlain(from, to, []byte(q))
 	}
 
 	// Build the lazy reader.
@@ -443,16 +305,47 @@ func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, s
 	// TODO(pb): statsOnly requires a different code path altogether
 
 	return QueryResult{
-		Engine:          string(QueryEngineLazy),
 		From:            from.String(),
 		To:              to.String(),
 		Q:               q,
 		NodesQueried:    1,
 		SegmentsQueried: len(segments),
-		RecordsQueried:  -1,
-		RecordsMatched:  -1,
 		Records:         ioutil.NopCloser(r),
 	}, nil
+}
+
+func recordFilterPlain(from, to ulid.ULID, q []byte) recordFilter {
+	fromBytes, err := from.MarshalText()
+	if err != nil {
+		panic(err)
+	}
+	toBytes, err := to.MarshalText()
+	if err != nil {
+		panic(err)
+	}
+	return func(b []byte) bool {
+		return len(b) > ulid.EncodedSize &&
+			bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 &&
+			bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 &&
+			bytes.Contains(b[ulid.EncodedSize+1:], q)
+	}
+}
+
+func recordFilterRegex(from, to ulid.ULID, q *regexp.Regexp) recordFilter {
+	fromBytes, err := from.MarshalText()
+	if err != nil {
+		panic(err)
+	}
+	toBytes, err := to.MarshalText()
+	if err != nil {
+		panic(err)
+	}
+	return func(b []byte) bool {
+		return len(b) > ulid.EncodedSize &&
+			bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 &&
+			bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 &&
+			q.Match(b[ulid.EncodedSize+1:])
+	}
 }
 
 // queryMatchingSegments returns a sorted slice of all segment files
