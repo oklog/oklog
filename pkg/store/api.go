@@ -96,27 +96,31 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 	}
 
 	var (
-		engine = r.URL.Query().Get("engine")
-		from   = r.URL.Query().Get("from")
-		to     = r.URL.Query().Get("to")
-		q      = r.URL.Query().Get("q")
+		from     = r.URL.Query().Get("from")
+		to       = r.URL.Query().Get("to")
+		q        = r.URL.Query().Get("q")
+		_, regex = r.URL.Query()["regex"]
 	)
-
-	if engine == "" {
-		engine = "naïve"
-	}
 
 	method := "GET"
 	if statsOnly {
 		method = "HEAD"
 	}
 
+	var asRegex string
+	if regex {
+		asRegex = "&regex=true"
+	}
+
 	var requests []*http.Request
 	for _, hostport := range members {
 		urlStr := fmt.Sprintf(
-			"http://%s/store/%s?engine=%s&from=%s&to=%s&q=%s",
+			"http://%s/store%s?from=%s&to=%s&q=%s%s",
 			hostport, APIPathInternalQuery,
-			url.QueryEscape(engine), url.QueryEscape(from), url.QueryEscape(to), url.QueryEscape(q),
+			url.QueryEscape(from),
+			url.QueryEscape(to),
+			url.QueryEscape(q),
+			asRegex,
 		)
 		req, err := http.NewRequest(method, urlStr, nil)
 		if err != nil {

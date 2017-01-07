@@ -55,11 +55,46 @@ func (log *fileLog) Create() (WriteSegment, error) {
 
 func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (QueryResult, error) {
 	var (
+		begin    = time.Now()
 		fromULID = ulid.MustNew(ulid.Timestamp(from), nil)
 		toULID   = ulid.MustNew(ulid.Timestamp(to), nil)
 		segments = log.queryMatchingSegments(fromULID, toULID)
+		pass     = recordFilterPlain(fromULID, toULID, []byte(q))
 	)
-	return log.queryLazy(segments, fromULID, toULID, q, regex, statsOnly)
+
+	if regex {
+		re, err := regexp.Compile(q)
+		if err != nil {
+			return QueryResult{}, err
+		}
+		pass = recordFilterRegex(fromULID, toULID, re)
+	}
+
+	// Build the lazy reader.
+	r, sz, err := newQueryReader(log.fs, segments, pass)
+	if err != nil {
+		return QueryResult{}, err
+	}
+
+	rc := ioutil.NopCloser(r) // TODO(pb): is this right?
+	if statsOnly {
+		rc = nil
+	}
+
+	return QueryResult{
+		From:  from.String(),
+		To:    to.String(),
+		Q:     q,
+		Regex: regex,
+
+		NodesQueried:    1,
+		SegmentsQueried: len(segments),
+		MaxDataSetSize:  sz,
+		ErrorCount:      0,
+		Duration:        time.Since(begin).String(),
+
+		Records: rc,
+	}, nil
 }
 
 func (log *fileLog) Overlapping() ([]ReadSegment, error) {
@@ -278,40 +313,6 @@ func (log *fileLog) Stats() (LogStats, error) {
 		return nil
 	})
 	return stats, nil
-}
-
-// queryLazy returns results via lazy-evaluated (streaming) readers.
-// We build up the chain of readers and return a result quite quickly;
-// costs are deferred to whoever reads the QueryResult Records.
-func (log *fileLog) queryLazy(segments []string, from, to ulid.ULID, q string, regex, statsOnly bool) (QueryResult, error) {
-	// Build the record filter.
-	var pass func([]byte) bool
-	if regex {
-		re, err := regexp.Compile(q)
-		if err != nil {
-			return QueryResult{}, err
-		}
-		pass = recordFilterRegex(from, to, re)
-	} else {
-		pass = recordFilterPlain(from, to, []byte(q))
-	}
-
-	// Build the lazy reader.
-	r, err := newQueryReader(log.fs, segments, pass)
-	if err != nil {
-		return QueryResult{}, err
-	}
-
-	// TODO(pb): statsOnly requires a different code path altogether
-
-	return QueryResult{
-		From:            from.String(),
-		To:              to.String(),
-		Q:               q,
-		NodesQueried:    1,
-		SegmentsQueried: len(segments),
-		Records:         ioutil.NopCloser(r),
-	}, nil
 }
 
 func recordFilterPlain(from, to ulid.ULID, q []byte) recordFilter {

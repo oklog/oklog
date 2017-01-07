@@ -3,6 +3,7 @@ package store
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -19,25 +20,18 @@ import (
 
 // QueryResult contains statistics about, and matching records for, a query.
 type QueryResult struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-	Q    string `json:"q"`
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Q     string `json:"q"`
+	Regex bool   `json:"regex"`
 
-	NodesQueried    int `json:"nodes_queried"`
-	SegmentsQueried int `json:"segments_queried"`
-	ErrorCount      int `json:"error_count,omitempty"`
+	NodesQueried    int    `json:"nodes_queried"`
+	SegmentsQueried int    `json:"segments_queried"`
+	MaxDataSetSize  int64  `json:"max_data_set_size"`
+	ErrorCount      int    `json:"error_count,omitempty"`
+	Duration        string `json:"duration"`
 
 	Records io.ReadCloser // TODO(pb): audit to ensure closing is valid throughout
-}
-
-// DecodeFrom decodes the QueryResult from the HTTP response.
-func (qr *QueryResult) DecodeFrom(resp *http.Response) {
-	qr.From = resp.Header.Get(httpHeaderFrom)
-	qr.To = resp.Header.Get(httpHeaderTo)
-	qr.Q = resp.Header.Get(httpHeaderQ)
-	qr.NodesQueried, _ = strconv.Atoi(resp.Header.Get(httpHeaderNodesQueried))
-	qr.SegmentsQueried, _ = strconv.Atoi(resp.Header.Get(httpHeaderSegmentsQueried))
-	qr.Records = resp.Body
 }
 
 // EncodeTo encodes the QueryResult to the HTTP response writer.
@@ -45,21 +39,43 @@ func (qr *QueryResult) EncodeTo(w http.ResponseWriter) {
 	w.Header().Set(httpHeaderFrom, qr.From)
 	w.Header().Set(httpHeaderTo, qr.To)
 	w.Header().Set(httpHeaderQ, qr.Q)
+	w.Header().Set(httpHeaderRegex, fmt.Sprint(qr.Regex))
+
 	w.Header().Set(httpHeaderNodesQueried, strconv.Itoa(qr.NodesQueried))
 	w.Header().Set(httpHeaderSegmentsQueried, strconv.Itoa(qr.SegmentsQueried))
+	w.Header().Set(httpHeaderMaxDataSetSize, strconv.FormatInt(qr.MaxDataSetSize, 10))
+	w.Header().Set(httpHeaderErrorCount, strconv.Itoa(qr.ErrorCount))
+	w.Header().Set(httpHeaderDuration, qr.Duration)
+
 	if qr.Records != nil {
 		io.Copy(w, qr.Records) // TODO(pb): CopyBuffer
 		qr.Records.Close()
 	}
 }
 
+// DecodeFrom decodes the QueryResult from the HTTP response.
+func (qr *QueryResult) DecodeFrom(resp *http.Response) {
+	qr.From = resp.Header.Get(httpHeaderFrom)
+	qr.To = resp.Header.Get(httpHeaderTo)
+	qr.Q = resp.Header.Get(httpHeaderQ)
+	qr.Regex, _ = strconv.ParseBool(resp.Header.Get(httpHeaderRegex))
+	qr.NodesQueried, _ = strconv.Atoi(resp.Header.Get(httpHeaderNodesQueried))
+	qr.SegmentsQueried, _ = strconv.Atoi(resp.Header.Get(httpHeaderSegmentsQueried))
+	qr.MaxDataSetSize, _ = strconv.ParseInt(resp.Header.Get(httpHeaderMaxDataSetSize), 10, 64)
+	qr.ErrorCount, _ = strconv.Atoi(resp.Header.Get(httpHeaderErrorCount))
+	qr.Duration = resp.Header.Get(httpHeaderDuration)
+	qr.Records = resp.Body
+}
+
 // Merge the other QueryResult into this one.
 func (qr *QueryResult) Merge(other QueryResult) error {
 	qr.NodesQueried += other.NodesQueried
 	qr.SegmentsQueried += other.SegmentsQueried
+	if other.MaxDataSetSize > qr.MaxDataSetSize {
+		qr.MaxDataSetSize = other.MaxDataSetSize
+	}
 	qr.ErrorCount += other.ErrorCount
 
-	// TODO(pb): error handling during mergeRecords
 	var (
 		buf bytes.Buffer
 		err error
@@ -81,11 +97,15 @@ func (qr *QueryResult) Merge(other QueryResult) error {
 }
 
 const (
-	httpHeaderFrom            = "X-OKLog-From"
-	httpHeaderTo              = "X-OKLog-To"
-	httpHeaderQ               = "X-OKLog-Q"
-	httpHeaderNodesQueried    = "X-OKLog-Nodes-Queried"
-	httpHeaderSegmentsQueried = "X-OKLog-Segments-Queried"
+	httpHeaderFrom            = "X-Oklog-From"
+	httpHeaderTo              = "X-Oklog-To"
+	httpHeaderQ               = "X-Oklog-Q"
+	httpHeaderRegex           = "X-Oklog-Regex"
+	httpHeaderNodesQueried    = "X-Oklog-Nodes-Queried"
+	httpHeaderSegmentsQueried = "X-Oklog-Segments-Queried"
+	httpHeaderMaxDataSetSize  = "X-Oklog-Max-Data-Set-Size"
+	httpHeaderErrorCount      = "X-Oklog-Error-Count"
+	httpHeaderDuration        = "X-Oklog-Duration"
 )
 
 type recordFilter func([]byte) bool
@@ -93,7 +113,7 @@ type recordFilter func([]byte) bool
 // newQueryReader converts a batch of segment files to a single io.Reader.
 // Records are yielded in time order, oldest first, hopefully efficiently!
 // Only records passing the recordFilter are yielded.
-func newQueryReader(fs fs.Filesystem, segments []string, pass recordFilter) (io.Reader, error) {
+func newQueryReader(fs fs.Filesystem, segments []string, pass recordFilter) (r io.Reader, sz int64, err error) {
 	// Batch the segments, and construct a reader for each batch.
 	var readers []io.Reader
 	for _, batch := range batchSegments(segments) {
@@ -105,26 +125,28 @@ func newQueryReader(fs fs.Filesystem, segments []string, pass recordFilter) (io.
 			// A batch of one can be read straight thru.
 			f, err := fs.Open(batch[0])
 			if err != nil {
-				return nil, err // TODO(pb): don't leak FDs
+				return nil, sz, err // TODO(pb): don't leak FDs
 			}
 			readers = append(readers, newConcurrentFilteringReader(f, pass))
+			sz += f.Size()
 
 		default:
 			// A batch of N requires a K-way merge.
-			readers, err := makeConcurrentFilteringReaders(fs, batch, pass)
+			readers, batchsz, err := makeConcurrentFilteringReaders(fs, batch, pass)
 			if err != nil {
-				return nil, err // TODO(pb): don't leak FDs
+				return nil, sz, err // TODO(pb): don't leak FDs
 			}
-			r, err := newMergeReader(readers)
+			mr, err := newMergeReader(readers)
 			if err != nil {
-				return nil, err // TODO(pb): don't leak FDs
+				return nil, sz, err // TODO(pb): don't leak FDs
 			}
-			readers = append(readers, r)
+			readers = append(readers, mr)
+			sz += batchsz
 		}
 	}
 
 	// The MultiReader drains each reader in sequence.
-	return io.MultiReader(readers...), nil
+	return io.MultiReader(readers...), sz, nil
 }
 
 // batchSegments batches segments together if they overlap in time.
@@ -178,16 +200,17 @@ func max(a, b string) string {
 	return b
 }
 
-func makeConcurrentFilteringReaders(fs fs.Filesystem, segments []string, pass recordFilter) ([]io.Reader, error) {
-	readers := make([]io.Reader, len(segments))
+func makeConcurrentFilteringReaders(fs fs.Filesystem, segments []string, pass recordFilter) (readers []io.Reader, sz int64, err error) {
+	readers = make([]io.Reader, len(segments))
 	for i := range segments {
 		f, err := fs.Open(segments[i])
 		if err != nil {
-			return nil, err // TODO(pb): don't leak FDs
+			return nil, sz, err // TODO(pb): don't leak FDs
 		}
 		readers[i] = newConcurrentFilteringReader(f, pass)
+		sz += f.Size()
 	}
-	return readers, nil
+	return readers, sz, nil
 }
 
 func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
