@@ -27,7 +27,7 @@ const (
 
 // NewFileLog returns a Log backed by the filesystem at path root.
 // Note that we don't own segment files! They may disappear.
-func NewFileLog(fs fs.Filesystem, root string, segmentTargetSize int64) (Log, error) {
+func NewFileLog(fs fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64) (Log, error) {
 	if err := fs.MkdirAll(root); err != nil {
 		return nil, err
 	}
@@ -35,6 +35,7 @@ func NewFileLog(fs fs.Filesystem, root string, segmentTargetSize int64) (Log, er
 		fs:                fs,
 		root:              root,
 		segmentTargetSize: segmentTargetSize,
+		segmentBufferSize: segmentBufferSize,
 	}, nil
 }
 
@@ -42,6 +43,7 @@ type fileLog struct {
 	fs                fs.Filesystem
 	root              string
 	segmentTargetSize int64
+	segmentBufferSize int64
 }
 
 func (log *fileLog) Create() (WriteSegment, error) {
@@ -70,14 +72,12 @@ func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (
 	}
 
 	// Build the lazy reader.
-	r, sz, err := newQueryReader(log.fs, segments, pass)
+	rc, sz, err := newQueryReadCloser(log.fs, segments, pass, log.segmentBufferSize)
 	if err != nil {
 		return QueryResult{}, err
 	}
-
-	rc := ioutil.NopCloser(r) // TODO(pb): is this right?
 	if statsOnly {
-		rc = nil
+		rc = ioutil.NopCloser(bytes.NewReader(nil))
 	}
 
 	return QueryResult{

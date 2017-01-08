@@ -29,6 +29,7 @@ func runStore(args []string) error {
 		storePath                = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
 		segmentConsumers         = flagset.Int("store.segment-consumers", 1, "concurrent segment consumers")
 		segmentTargetSize        = flagset.Int64("store.segment-target-size", 32*1024*1024, "try to keep store segments about this size")
+		segmentBufferSize        = flagset.Int64("store.segment-buffer-size", 1024*1024, "per-segment in-memory read buffer during queries")
 		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", 2, "how many copies of each segment to replicate")
 		segmentRetain            = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
 		segmentPurge             = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
@@ -147,7 +148,7 @@ func runStore(args []string) error {
 	default:
 		return errors.Errorf("invalid -filesystem %q", *filesystem)
 	}
-	storeLog, err := store.NewFileLog(fsys, *storePath, *segmentTargetSize)
+	storeLog, err := store.NewFileLog(fsys, *storePath, *segmentTargetSize, *segmentBufferSize)
 	if err != nil {
 		return err
 	}

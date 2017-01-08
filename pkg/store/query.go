@@ -20,21 +20,22 @@ import (
 
 // QueryResult contains statistics about, and matching records for, a query.
 type QueryResult struct {
-	From  string `json:"from"`
-	To    string `json:"to"`
-	Q     string `json:"q"`
-	Regex bool   `json:"regex"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Q        string `json:"q"`
+	Regex    bool   `json:"regex"`
+	Duration string `json:"duration"`
 
-	NodesQueried    int    `json:"nodes_queried"`
-	SegmentsQueried int    `json:"segments_queried"`
-	MaxDataSetSize  int64  `json:"max_data_set_size"`
-	ErrorCount      int    `json:"error_count,omitempty"`
-	Duration        string `json:"duration"`
+	NodesQueried    int   `json:"nodes_queried"`
+	SegmentsQueried int   `json:"segments_queried"`
+	MaxDataSetSize  int64 `json:"max_data_set_size"`
+	ErrorCount      int   `json:"error_count,omitempty"`
 
 	Records io.ReadCloser // TODO(pb): audit to ensure closing is valid throughout
 }
 
 // EncodeTo encodes the QueryResult to the HTTP response writer.
+// It also closes the records ReadCloser.
 func (qr *QueryResult) EncodeTo(w http.ResponseWriter) {
 	w.Header().Set(httpHeaderFrom, qr.From)
 	w.Header().Set(httpHeaderTo, qr.To)
@@ -110,12 +111,13 @@ const (
 
 type recordFilter func([]byte) bool
 
-// newQueryReader converts a batch of segment files to a single io.Reader.
+// newQueryReadCloser converts a batch of segments to a single io.ReadCloser.
 // Records are yielded in time order, oldest first, hopefully efficiently!
 // Only records passing the recordFilter are yielded.
-func newQueryReader(fs fs.Filesystem, segments []string, pass recordFilter) (r io.Reader, sz int64, err error) {
+// The sz of the segment files can be used as a proxy for read effort.
+func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, bufsz int64) (rc io.ReadCloser, sz int64, err error) {
 	// Batch the segments, and construct a reader for each batch.
-	var readers []io.Reader
+	var rcs []io.ReadCloser
 	for _, batch := range batchSegments(segments) {
 		switch len(batch) {
 		case 0:
@@ -127,26 +129,27 @@ func newQueryReader(fs fs.Filesystem, segments []string, pass recordFilter) (r i
 			if err != nil {
 				return nil, sz, err // TODO(pb): don't leak FDs
 			}
-			readers = append(readers, newConcurrentFilteringReader(f, pass))
+			rcs = append(rcs, newConcurrentFilteringReadCloser(f, pass, bufsz))
 			sz += f.Size()
 
 		default:
 			// A batch of N requires a K-way merge.
-			readers, batchsz, err := makeConcurrentFilteringReaders(fs, batch, pass)
+			rcs, batchsz, err := makeConcurrentFilteringReadClosers(fs, batch, pass, bufsz)
 			if err != nil {
 				return nil, sz, err // TODO(pb): don't leak FDs
 			}
-			mr, err := newMergeReader(readers)
+			rc, err := newMergeReadCloser(rcs)
 			if err != nil {
 				return nil, sz, err // TODO(pb): don't leak FDs
 			}
-			readers = append(readers, mr)
+			rcs = append(rcs, rc)
 			sz += batchsz
 		}
 	}
 
-	// The MultiReader drains each reader in sequence.
-	return io.MultiReader(readers...), sz, nil
+	// MultiReadCloser uses an io.MultiReader under the hood.
+	// A MultiReader reads from each reader in sequence.
+	return newMultiReadCloser(rcs...), sz, nil
 }
 
 // batchSegments batches segments together if they overlap in time.
@@ -200,23 +203,33 @@ func max(a, b string) string {
 	return b
 }
 
-func makeConcurrentFilteringReaders(fs fs.Filesystem, segments []string, pass recordFilter) (readers []io.Reader, sz int64, err error) {
-	readers = make([]io.Reader, len(segments))
+func makeConcurrentFilteringReadClosers(fs fs.Filesystem, segments []string, pass recordFilter, bufsz int64) (rcs []io.ReadCloser, sz int64, err error) {
+	// Don't leak FDs on error.
+	defer func() {
+		if err != nil {
+			for _, rc := range rcs {
+				rc.Close()
+			}
+			rcs = nil
+		}
+	}()
+
+	rcs = make([]io.ReadCloser, len(segments))
 	for i := range segments {
 		f, err := fs.Open(segments[i])
 		if err != nil {
-			return nil, sz, err // TODO(pb): don't leak FDs
+			return rcs, sz, err
 		}
-		readers[i] = newConcurrentFilteringReader(f, pass)
+		rcs[i] = newConcurrentFilteringReadCloser(f, pass, bufsz)
 		sz += f.Size()
 	}
-	return readers, sz, nil
+	return rcs, sz, nil
 }
 
-func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
-	r, w := nio.Pipe(buffer.New(1024 * 1024))
-	//r, w := io.Pipe()
+func newConcurrentFilteringReadCloser(src io.ReadCloser, pass recordFilter, bufsz int64) io.ReadCloser {
+	r, w := nio.Pipe(buffer.New(bufsz))
 	go func() {
+		defer src.Close() // close the fs.File when we're done reading
 		br := bufio.NewReader(src)
 		for {
 			line, err := br.ReadSlice('\n')
@@ -227,10 +240,13 @@ func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
 			if !pass(line) {
 				continue
 			}
-			if n, err := w.Write(line); err != nil {
+			switch n, err := w.Write(line); {
+			case err == io.ErrClosedPipe:
+				return // no need to close
+			case err != nil:
 				w.CloseWithError(err)
 				return
-			} else if n < len(line) {
+			case n < len(line):
 				w.CloseWithError(io.ErrShortWrite)
 				return
 			}
@@ -239,22 +255,24 @@ func newConcurrentFilteringReader(src io.Reader, pass recordFilter) io.Reader {
 	return r
 }
 
-// mergeReader performs a K-way merge from multiple readers.
+// mergeReadCloser performs a K-way merge from multiple readers.
 // TODO(pb): the readers need to be closed; wire that thru
-type mergeReader struct {
+type mergeReadCloser struct {
+	close   []io.Closer
 	scanner []*bufio.Scanner
 	ok      []bool
 	record  [][]byte
 	id      [][]byte
 }
 
-func newMergeReader(readers []io.Reader) (io.Reader, error) {
+func newMergeReadCloser(rcs []io.ReadCloser) (io.ReadCloser, error) {
 	// Initialize our state.
-	r := &mergeReader{
-		scanner: make([]*bufio.Scanner, len(readers)),
-		ok:      make([]bool, len(readers)),
-		record:  make([][]byte, len(readers)),
-		id:      make([][]byte, len(readers)),
+	rc := &mergeReadCloser{
+		close:   make([]io.Closer, len(rcs)),
+		scanner: make([]*bufio.Scanner, len(rcs)),
+		ok:      make([]bool, len(rcs)),
+		record:  make([][]byte, len(rcs)),
+		id:      make([][]byte, len(rcs)),
 	}
 
 	// Initialize all of the scanners and their first record.
@@ -262,27 +280,28 @@ func newMergeReader(readers []io.Reader) (io.Reader, error) {
 		scanBufferSize   = 64 * 1024      // 64KB
 		scanMaxTokenSize = scanBufferSize // if equal, no allocs
 	)
-	for i := 0; i < len(readers); i++ {
-		r.scanner[i] = bufio.NewScanner(readers[i])
-		r.scanner[i].Buffer(make([]byte, scanBufferSize), scanMaxTokenSize)
-		if err := r.advance(i); err != nil {
+	for i := 0; i < len(rcs); i++ {
+		rc.close[i] = rcs[i]
+		rc.scanner[i] = bufio.NewScanner(rcs[i])
+		rc.scanner[i].Buffer(make([]byte, scanBufferSize), scanMaxTokenSize)
+		if err := rc.advance(i); err != nil {
 			return nil, err
 		}
 	}
 
 	// Ready to read.
-	return r, nil
+	return rc, nil
 }
 
-func (r *mergeReader) Read(p []byte) (int, error) {
+func (rc *mergeReadCloser) Read(p []byte) (int, error) {
 	// Pick the source with the smallest ID.
 	// TODO(pb): could be improved with an e.g. tournament tree
 	smallest := -1 // index
-	for i := range r.id {
-		if !r.ok[i] {
+	for i := range rc.id {
+		if !rc.ok[i] {
 			continue // already drained
 		}
-		if smallest < 0 || bytes.Compare(r.id[i], r.id[smallest]) < 0 {
+		if smallest < 0 || bytes.Compare(rc.id[i], rc.id[smallest]) < 0 {
 			smallest = i
 		}
 	}
@@ -291,14 +310,14 @@ func (r *mergeReader) Read(p []byte) (int, error) {
 	}
 
 	// Copy the record over.
-	src := append(r.record[smallest], '\n')
+	src := append(rc.record[smallest], '\n')
 	n := copy(p, src)
 	if n < len(src) {
 		panic("short read!") // TODO(pb): obviously needs fixing
 	}
 
 	// Advance the chosen source.
-	if err := r.advance(smallest); err != nil {
+	if err := rc.advance(smallest); err != nil {
 		return n, errors.Wrapf(err, "advancing reader %d", smallest)
 	}
 
@@ -306,15 +325,68 @@ func (r *mergeReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func (r *mergeReader) advance(i int) error {
-	if r.ok[i] = r.scanner[i].Scan(); r.ok[i] {
-		r.record[i] = r.scanner[i].Bytes()
-		if len(r.record[i]) < ulid.EncodedSize {
+func (rc *mergeReadCloser) Close() error {
+	return multiCloser(rc.close).Close()
+}
+
+func (rc *mergeReadCloser) advance(i int) error {
+	if rc.ok[i] = rc.scanner[i].Scan(); rc.ok[i] {
+		rc.record[i] = rc.scanner[i].Bytes()
+		if len(rc.record[i]) < ulid.EncodedSize {
 			panic("record is too short")
 		}
-		r.id[i] = r.record[i][:ulid.EncodedSize]
-	} else if err := r.scanner[i].Err(); err != nil && err != io.EOF {
+		rc.id[i] = rc.record[i][:ulid.EncodedSize]
+	} else if err := rc.scanner[i].Err(); err != nil && err != io.EOF {
 		return err
 	}
 	return nil
+}
+
+type readCloser struct {
+	io.Reader
+	io.Closer
+}
+
+func newMultiReadCloser(rc ...io.ReadCloser) io.ReadCloser {
+	var (
+		r = make([]io.Reader, len(rc))
+		c = make([]io.Closer, len(rc))
+	)
+	for i := range rc {
+		r[i] = rc[i]
+		c[i] = rc[i]
+	}
+	return readCloser{
+		Reader: io.MultiReader(r...),
+		Closer: multiCloser(c),
+	}
+}
+
+// multiCloser closes all underlying io.Closers.
+// If an error is encountered, closings continue.
+type multiCloser []io.Closer
+
+func (c multiCloser) Close() error {
+	var errs []error
+	for _, closer := range c {
+		if err := closer.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return multiCloseError{errs}
+	}
+	return nil
+}
+
+type multiCloseError struct {
+	errs []error
+}
+
+func (e multiCloseError) Error() string {
+	a := make([]string, len(e.errs))
+	for i, err := range e.errs {
+		a[i] = err.Error()
+	}
+	return strings.Join(a, "; ")
 }

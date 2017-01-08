@@ -99,6 +99,8 @@ func (f realFile) Size() int64 {
 	return fi.Size()
 }
 
+// multiCloser closes all underlying io.Closers.
+// If an error is encountered, closing is short-circuited.
 type multiCloser []io.Closer
 
 func (mc multiCloser) Close() error {
