@@ -112,10 +112,11 @@ func BenchmarkMergeRecordsToLog(b *testing.B) {
 		recordCount       = 10000
 		recordSize        = 1024
 		segmentTargetSize = recordCount * recordSize * (readerCount / 5)
+		segmentBufferSize = 1024
 		charset           = "0123456789ABCDEFGHJKMNPQRSTVWXYZ "
 	)
 
-	dst, err := NewFileLog(fs.NewNopFilesystem(), "/", segmentTargetSize)
+	dst, err := NewFileLog(fs.NewNopFilesystem(), "/", segmentTargetSize, segmentBufferSize)
 	if err != nil {
 		b.Fatal(err)
 	}

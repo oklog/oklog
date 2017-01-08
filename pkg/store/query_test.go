@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -68,7 +69,7 @@ func TestBatchSegments(t *testing.T) {
 	}
 }
 
-func TestMergeReader(t *testing.T) {
+func TestMergeReadCloser(t *testing.T) {
 	t.Parallel()
 
 	var (
@@ -110,21 +111,21 @@ func TestMergeReader(t *testing.T) {
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
 			// Convert string slice to a set of readers.
-			readers := make([]io.Reader, len(testcase.input))
+			rcs := make([]io.ReadCloser, len(testcase.input))
 			for i, s := range testcase.input {
 				segment := strings.Join(s, "\n") + "\n"
-				readers[i] = strings.NewReader(segment)
+				rcs[i] = ioutil.NopCloser(strings.NewReader(segment))
 			}
 
 			// Construct the merge reader from the set of readers.
-			r, err := newMergeReader(readers)
+			rc, err := newMergeReadCloser(rcs)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Take lines from the merge reader until EOF.
 			have := []string{}
-			s := bufio.NewScanner(r)
+			s := bufio.NewScanner(rc)
 			for s.Scan() {
 				have = append(have, s.Text())
 			}
@@ -144,9 +145,9 @@ func TestMergeReader(t *testing.T) {
 //   ./store.test -test.run=XXX -test.benchmem -test.cpuprofile=out -test.bench=MergeReader
 //   go tool pprof -web store.test out
 //
-func BenchmarkMergeReader(b *testing.B) {
+func BenchmarkMergeReadCloser(b *testing.B) {
 	const size = 32 * 1024 * 1024
-	r, err := newMergeReader(generateSegments(b, 128, size, "testdata/segments"))
+	r, err := newMergeReadCloser(generateSegments(b, 128, size, "testdata/segments"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -158,7 +159,7 @@ func BenchmarkMergeReader(b *testing.B) {
 	}
 }
 
-func generateSegments(b testing.TB, count, size int, datadir string) (segs []io.Reader) {
+func generateSegments(b testing.TB, count, size int, datadir string) (segs []io.ReadCloser) {
 	if err := os.MkdirAll(datadir, 0755); err != nil {
 		b.Fatal(err)
 	}
@@ -216,7 +217,7 @@ func generateSegments(b testing.TB, count, size int, datadir string) (segs []io.
 	return segs
 }
 
-func TestConcurrentFilteringReader(t *testing.T) {
+func TestConcurrentFilteringReadCloser(t *testing.T) {
 	t.Parallel()
 
 	var input bytes.Buffer
@@ -279,8 +280,8 @@ func TestConcurrentFilteringReader(t *testing.T) {
 			in := bytes.NewReader(input.Bytes())
 			re := regexp.MustCompile(testcase.q)
 			pass := recordFilterRegex(testcase.from, testcase.to, re)
-			r := newConcurrentFilteringReader(in, pass)
-			if want, have := testcase.want, records(r); !reflect.DeepEqual(want, have) {
+			rc := newConcurrentFilteringReadCloser(ioutil.NopCloser(in), pass, 1024)
+			if want, have := testcase.want, records(rc); !reflect.DeepEqual(want, have) {
 				t.Errorf("want %v, have %v", want, have)
 			}
 		})
