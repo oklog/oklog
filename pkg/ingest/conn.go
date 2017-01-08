@@ -55,7 +55,7 @@ func HandleConnections(
 		m.register(conn)
 		go func() {
 			h(conn, w, idGen, connectedClients)
-			w.closeOnly() // make sure it's flushed
+			w.Stop() // make sure it's flushed
 			m.remove(conn)
 		}()
 	}

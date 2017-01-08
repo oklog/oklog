@@ -32,7 +32,23 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 	// Listen for connections.
 	// When shut down, send the error on the chan.
 	errc := make(chan error, 1)
-	go func() { errc <- HandleConnections(ln, echo(t), log, time.Second, 1024, nil, nil, nil, nil, nil, nil) }()
+	var (
+		connectionHandler = echo(t)
+		segmentFlushAge   = time.Second
+		segmentFlushSize  = 1024 // B
+		connectedClients  = prometheus.NewGauge(prometheus.GaugeOpts{})
+		bytes             = prometheus.NewCounter(prometheus.CounterOpts{})
+		records           = prometheus.NewCounter(prometheus.CounterOpts{})
+		syncs             = prometheus.NewCounter(prometheus.CounterOpts{})
+		segmentAge        = prometheus.NewHistogram(prometheus.HistogramOpts{})
+		segmentSize       = prometheus.NewHistogram(prometheus.HistogramOpts{})
+	)
+	go func() {
+		errc <- HandleConnections(
+			ln, connectionHandler, log, segmentFlushAge, segmentFlushSize,
+			connectedClients, bytes, records, syncs, segmentAge, segmentSize,
+		)
+	}()
 
 	// Connect to the handler.
 	var conn net.Conn
@@ -55,7 +71,8 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case <-errc:
+	case err := <-errc:
+		t.Logf("HandleConnections returned: %v", err)
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for shutdown")
 	}
