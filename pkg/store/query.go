@@ -49,7 +49,10 @@ func (qr *QueryResult) EncodeTo(w http.ResponseWriter) {
 	w.Header().Set(httpHeaderDuration, qr.Duration)
 
 	if qr.Records != nil {
-		io.Copy(w, qr.Records) // TODO(pb): CopyBuffer
+		// CopyBuffer can be useful for complex query pipelines.
+		// TODO(pb): validate the 1MB buffer size with profiling
+		buf := make([]byte, 1024*1024)
+		io.CopyBuffer(w, qr.Records, buf)
 		qr.Records.Close()
 	}
 }
