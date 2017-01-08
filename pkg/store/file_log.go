@@ -55,7 +55,6 @@ func (log *fileLog) Create() (WriteSegment, error) {
 
 func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (QueryResult, error) {
 	var (
-		begin    = time.Now()
 		fromULID = ulid.MustNew(ulid.Timestamp(from), nil)
 		toULID   = ulid.MustNew(ulid.Timestamp(to), nil)
 		segments = log.queryMatchingSegments(fromULID, toULID)
@@ -91,7 +90,6 @@ func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (
 		SegmentsQueried: len(segments),
 		MaxDataSetSize:  sz,
 		ErrorCount:      0,
-		Duration:        time.Since(begin).String(),
 
 		Records: rc,
 	}, nil

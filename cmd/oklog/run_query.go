@@ -32,7 +32,7 @@ func runQuery(args []string) error {
 
 	begin := time.Now()
 
-	_, _, hostport, _, err := parseAddr(*storeAddr, defaultAPIPort)
+	_, hostport, _, _, err := parseAddr(*storeAddr, defaultAPIPort)
 	if err != nil {
 		return errors.Wrap(err, "couldn't parse -store")
 	}
@@ -110,7 +110,7 @@ func runQuery(args []string) error {
 	fmt.Fprintf(os.Stderr, "Queried %s %q\n", qtype, result.Q)
 	fmt.Fprintf(os.Stderr, "%d node(s) queried\n", result.NodesQueried)
 	fmt.Fprintf(os.Stderr, "%d segment(s) queried\n", result.SegmentsQueried)
-	fmt.Fprintf(os.Stderr, "%d bytes maximum data set size\n", result.MaxDataSetSize)
+	fmt.Fprintf(os.Stderr, "%dB (%dMiB) maximum data set size\n", result.MaxDataSetSize, result.MaxDataSetSize/(1024*1024))
 	fmt.Fprintf(os.Stderr, "%d error(s)\n", result.ErrorCount)
 	fmt.Fprintf(os.Stderr, "%s server-reported duration\n", result.Duration)
 

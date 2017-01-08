@@ -88,6 +88,8 @@ func (iw *interceptingWriter) WriteHeader(code int) {
 }
 
 func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly bool) {
+	begin := time.Now()
+
 	members := a.peer.Current(cluster.PeerTypeStore)
 	if len(members) <= 0 {
 		// Very odd; we should at least find ourselves!
@@ -170,6 +172,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 			return
 		}
 	}
+	result.Duration = time.Since(begin).String()
 	result.EncodeTo(w)
 }
 
