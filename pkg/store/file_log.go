@@ -23,6 +23,8 @@ const (
 	extFlushed = ".flushed"
 	extReading = ".reading" // compacting or trashing
 	extTrashed = ".trashed"
+
+	ulidTimeSize = 10 // bytes
 )
 
 // NewFileLog returns a Log backed by the filesystem at path root.
@@ -62,6 +64,11 @@ func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (
 		segments = log.queryMatchingSegments(fromULID, toULID)
 		pass     = recordFilterPlain(fromULID, toULID, []byte(q))
 	)
+
+	// Time range should be inclusive, so we need a max value here.
+	if err := toULID.SetEntropy(bytes.Repeat([]byte{0xFF}, ulidTimeSize)); err != nil {
+		panic(err)
+	}
 
 	if regex {
 		re, err := regexp.Compile(q)
@@ -314,35 +321,27 @@ func (log *fileLog) Stats() (LogStats, error) {
 }
 
 func recordFilterPlain(from, to ulid.ULID, q []byte) recordFilter {
-	fromBytes, err := from.MarshalText()
-	if err != nil {
-		panic(err)
-	}
-	toBytes, err := to.MarshalText()
-	if err != nil {
-		panic(err)
-	}
+	fromBytes, _ := from.MarshalText()
+	fromBytes = fromBytes[:ulidTimeSize]
+	toBytes, _ := to.MarshalText()
+	toBytes = toBytes[:ulidTimeSize]
 	return func(b []byte) bool {
 		return len(b) > ulid.EncodedSize &&
-			bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 &&
-			bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 &&
+			bytes.Compare(b[:ulidTimeSize], fromBytes) >= 0 &&
+			bytes.Compare(b[:ulidTimeSize], toBytes) <= 0 &&
 			bytes.Contains(b[ulid.EncodedSize+1:], q)
 	}
 }
 
 func recordFilterRegex(from, to ulid.ULID, q *regexp.Regexp) recordFilter {
-	fromBytes, err := from.MarshalText()
-	if err != nil {
-		panic(err)
-	}
-	toBytes, err := to.MarshalText()
-	if err != nil {
-		panic(err)
-	}
+	fromBytes, _ := from.MarshalText()
+	fromBytes = fromBytes[:ulidTimeSize]
+	toBytes, _ := to.MarshalText()
+	toBytes = toBytes[:ulidTimeSize]
 	return func(b []byte) bool {
 		return len(b) > ulid.EncodedSize &&
-			bytes.Compare(b[:ulid.EncodedSize], fromBytes) >= 0 &&
-			bytes.Compare(b[:ulid.EncodedSize], toBytes) <= 0 &&
+			bytes.Compare(b[:ulidTimeSize], fromBytes) >= 0 &&
+			bytes.Compare(b[:ulidTimeSize], toBytes) <= 0 &&
 			q.Match(b[ulid.EncodedSize+1:])
 	}
 }

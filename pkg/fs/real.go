@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/oklog/prototype/pkg/ioext"
@@ -100,14 +101,31 @@ func (f realFile) Size() int64 {
 }
 
 // multiCloser closes all underlying io.Closers.
-// If an error is encountered, closing is short-circuited.
+// If an error is encountered, closings continue.
 type multiCloser []io.Closer
 
-func (mc multiCloser) Close() error {
-	for _, c := range mc {
-		if err := c.Close(); err != nil {
-			return err
+func (c multiCloser) Close() error {
+	var errs []error
+	for _, closer := range c {
+		if closer == nil {
+			continue
+		}
+		if err := closer.Close(); err != nil {
+			errs = append(errs, err)
 		}
 	}
+	if len(errs) > 0 {
+		return multiCloseError(errs)
+	}
 	return nil
+}
+
+type multiCloseError []error
+
+func (e multiCloseError) Error() string {
+	a := make([]string, len(e))
+	for i, err := range e {
+		a[i] = err.Error()
+	}
+	return strings.Join(a, "; ")
 }

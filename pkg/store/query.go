@@ -58,21 +58,34 @@ func (qr *QueryResult) EncodeTo(w http.ResponseWriter) {
 }
 
 // DecodeFrom decodes the QueryResult from the HTTP response.
-func (qr *QueryResult) DecodeFrom(resp *http.Response) {
+func (qr *QueryResult) DecodeFrom(resp *http.Response) error {
 	qr.From = resp.Header.Get(httpHeaderFrom)
 	qr.To = resp.Header.Get(httpHeaderTo)
 	qr.Q = resp.Header.Get(httpHeaderQ)
-	qr.Regex, _ = strconv.ParseBool(resp.Header.Get(httpHeaderRegex))
-	qr.NodesQueried, _ = strconv.Atoi(resp.Header.Get(httpHeaderNodesQueried))
-	qr.SegmentsQueried, _ = strconv.Atoi(resp.Header.Get(httpHeaderSegmentsQueried))
-	qr.MaxDataSetSize, _ = strconv.ParseInt(resp.Header.Get(httpHeaderMaxDataSetSize), 10, 64)
-	qr.ErrorCount, _ = strconv.Atoi(resp.Header.Get(httpHeaderErrorCount))
+	var err error
+	if qr.Regex, err = strconv.ParseBool(resp.Header.Get(httpHeaderRegex)); err != nil {
+		return errors.Wrap(err, "regex")
+	}
+	if qr.NodesQueried, err = strconv.Atoi(resp.Header.Get(httpHeaderNodesQueried)); err != nil {
+		return errors.Wrap(err, "nodes queried")
+	}
+	if qr.SegmentsQueried, err = strconv.Atoi(resp.Header.Get(httpHeaderSegmentsQueried)); err != nil {
+		return errors.Wrap(err, "segments queried")
+	}
+	if qr.MaxDataSetSize, err = strconv.ParseInt(resp.Header.Get(httpHeaderMaxDataSetSize), 10, 64); err != nil {
+		return errors.Wrap(err, "max data set size")
+	}
+	if qr.ErrorCount, _ = strconv.Atoi(resp.Header.Get(httpHeaderErrorCount)); err != nil {
+		return errors.Wrap(err, "error count")
+	}
 	qr.Duration = resp.Header.Get(httpHeaderDuration)
 	qr.Records = resp.Body
+	return nil
 }
 
 // Merge the other QueryResult into this one.
 func (qr *QueryResult) Merge(other QueryResult) error {
+	// Union the simple integer types.
 	qr.NodesQueried += other.NodesQueried
 	qr.SegmentsQueried += other.SegmentsQueried
 	if other.MaxDataSetSize > qr.MaxDataSetSize {
@@ -80,23 +93,14 @@ func (qr *QueryResult) Merge(other QueryResult) error {
 	}
 	qr.ErrorCount += other.ErrorCount
 
-	var (
-		buf bytes.Buffer
-		err error
-	)
-	switch {
-	case qr.Records != nil && other.Records == nil:
-		defer qr.Records.Close()
-		_, _, _, err = mergeRecords(&buf, qr.Records)
-	case qr.Records == nil && other.Records != nil:
-		defer other.Records.Close()
-		_, _, _, err = mergeRecords(&buf, other.Records)
-	case qr.Records != nil && other.Records != nil:
-		defer qr.Records.Close()
-		defer other.Records.Close()
-		_, _, _, err = mergeRecords(&buf, qr.Records, other.Records)
-	}
+	// Merge the record readers.
+	// Both mergeRecords and multiCloser can handle nils.
+	var buf bytes.Buffer
+	_, _, _, err := mergeRecords(&buf, qr.Records, other.Records)
+	multiCloser{qr.Records, other.Records}.Close()
 	qr.Records = ioutil.NopCloser(&buf)
+
+	// Done.
 	return err
 }
 
@@ -119,8 +123,19 @@ type recordFilter func([]byte) bool
 // Only records passing the recordFilter are yielded.
 // The sz of the segment files can be used as a proxy for read effort.
 func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, bufsz int64) (rc io.ReadCloser, sz int64, err error) {
-	// Batch the segments, and construct a reader for each batch.
+	// We will build successive ReadClosers for each batch.
 	var rcs []io.ReadCloser
+
+	// Don't leak FDs on error.
+	defer func() {
+		if err != nil {
+			for _, rc := range rcs {
+				rc.Close()
+			}
+		}
+	}()
+
+	// Batch the segments, and construct a ReadCloser for each batch.
 	for _, batch := range batchSegments(segments) {
 		switch len(batch) {
 		case 0:
@@ -152,12 +167,15 @@ func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, 
 
 	// MultiReadCloser uses an io.MultiReader under the hood.
 	// A MultiReader reads from each reader in sequence.
-	return newMultiReadCloser(rcs...), sz, nil
+	rc = newMultiReadCloser(rcs...)
+	rcs = nil // ownership of each ReadCloser is passed
+	return rc, sz, nil
 }
 
 // batchSegments batches segments together if they overlap in time.
 func batchSegments(segments []string) [][]string {
 	// First, parse ranges from filename.
+	// TODO(pb): handle weird filenames better, somehow
 	type lexrange struct{ a, b string }
 	ranges := make([]lexrange, len(segments))
 	for i := range segments {
@@ -226,6 +244,7 @@ func makeConcurrentFilteringReadClosers(fs fs.Filesystem, segments []string, pas
 		rcs[i] = newConcurrentFilteringReadCloser(f, pass, bufsz)
 		sz += f.Size()
 	}
+
 	return rcs, sz, nil
 }
 
@@ -259,7 +278,6 @@ func newConcurrentFilteringReadCloser(src io.ReadCloser, pass recordFilter, bufs
 }
 
 // mergeReadCloser performs a K-way merge from multiple readers.
-// TODO(pb): the readers need to be closed; wire that thru
 type mergeReadCloser struct {
 	close   []io.Closer
 	scanner []*bufio.Scanner
@@ -372,23 +390,24 @@ type multiCloser []io.Closer
 func (c multiCloser) Close() error {
 	var errs []error
 	for _, closer := range c {
+		if closer == nil {
+			continue
+		}
 		if err := closer.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	if len(errs) > 0 {
-		return multiCloseError{errs}
+		return multiCloseError(errs)
 	}
 	return nil
 }
 
-type multiCloseError struct {
-	errs []error
-}
+type multiCloseError []error
 
 func (e multiCloseError) Error() string {
-	a := make([]string, len(e.errs))
-	for i, err := range e.errs {
+	a := make([]string, len(e))
+	for i, err := range e {
 		a[i] = err.Error()
 	}
 	return strings.Join(a, "; ")

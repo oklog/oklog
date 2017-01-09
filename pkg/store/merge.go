@@ -15,6 +15,15 @@ func mergeRecords(w io.Writer, readers ...io.Reader) (low, high ulid.ULID, n int
 		return low, high, 0, nil
 	}
 
+	// https://github.com/golang/go/wiki/SliceTricks
+	notnil := readers[:0]
+	for _, r := range readers {
+		if r != nil {
+			notnil = append(notnil, r)
+		}
+	}
+	readers = notnil
+
 	// Initialize our state.
 	var (
 		first   = true
@@ -111,6 +120,15 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 	if len(readers) == 0 {
 		return 0, nil
 	}
+
+	// https://github.com/golang/go/wiki/SliceTricks
+	notnil := readers[:0]
+	for _, r := range readers {
+		if r != nil {
+			notnil = append(notnil, r)
+		}
+	}
+	readers = notnil
 
 	// Per-segment state.
 	writeSegment, err := dst.Create()

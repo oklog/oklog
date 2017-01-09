@@ -45,7 +45,7 @@ func runQuery(args []string) error {
 	case fromNow:
 		fromStr = time.Now().Format(time.RFC3339Nano)
 	case durationErr == nil && timeErr != nil:
-		fromStr = time.Now().Add(makeNegative(fromDuration)).Format(time.RFC3339Nano)
+		fromStr = time.Now().Add(neg(fromDuration)).Format(time.RFC3339Nano)
 	case durationErr != nil && timeErr == nil:
 		fromStr = fromTime.Format(time.RFC3339Nano)
 	default:
@@ -60,7 +60,7 @@ func runQuery(args []string) error {
 	case toNow:
 		toStr = time.Now().Format(time.RFC3339Nano)
 	case durationErr == nil && timeErr != nil:
-		toStr = time.Now().Add(makeNegative(toDuration)).Format(time.RFC3339Nano)
+		toStr = time.Now().Add(neg(toDuration)).Format(time.RFC3339Nano)
 	case durationErr != nil && timeErr == nil:
 		toStr = toTime.Format(time.RFC3339Nano)
 	default:
@@ -122,7 +122,7 @@ func runQuery(args []string) error {
 	return nil
 }
 
-func makeNegative(d time.Duration) time.Duration {
+func neg(d time.Duration) time.Duration {
 	if d > 0 {
 		d = -d
 	}
