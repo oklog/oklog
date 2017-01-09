@@ -75,7 +75,7 @@ func (qr *QueryResult) DecodeFrom(resp *http.Response) error {
 	if qr.MaxDataSetSize, err = strconv.ParseInt(resp.Header.Get(httpHeaderMaxDataSetSize), 10, 64); err != nil {
 		return errors.Wrap(err, "max data set size")
 	}
-	if qr.ErrorCount, _ = strconv.Atoi(resp.Header.Get(httpHeaderErrorCount)); err != nil {
+	if qr.ErrorCount, err = strconv.Atoi(resp.Header.Get(httpHeaderErrorCount)); err != nil {
 		return errors.Wrap(err, "error count")
 	}
 	qr.Duration = resp.Header.Get(httpHeaderDuration)

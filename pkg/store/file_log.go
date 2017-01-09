@@ -27,6 +27,13 @@ const (
 	ulidTimeSize = 10 // bytes
 )
 
+var (
+	ulidMaxEntropy = []byte{
+		0xFF, 0xFF, 0xFF, 0xFF,
+		0xFF, 0xFF, 0xFF, 0xFF,
+	}
+)
+
 // NewFileLog returns a Log backed by the filesystem at path root.
 // Note that we don't own segment files! They may disappear.
 func NewFileLog(fs fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64) (Log, error) {
@@ -66,7 +73,7 @@ func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (
 	)
 
 	// Time range should be inclusive, so we need a max value here.
-	if err := toULID.SetEntropy(bytes.Repeat([]byte{0xFF}, ulidTimeSize)); err != nil {
+	if err := toULID.SetEntropy(ulidMaxEntropy); err != nil {
 		panic(err)
 	}
 
