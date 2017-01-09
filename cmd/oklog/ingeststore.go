@@ -33,7 +33,7 @@ func runIngestStore(args []string) error {
 		ingestPath               = flagset.String("ingest.path", filepath.Join("data", "ingest"), "path holding segment files for ingest tier")
 		segmentFlushSize         = flagset.Int("ingest.segment-flush-size", 32*1024*1024, "flush segments after they grow to this size")
 		segmentFlushAge          = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
-		segmentPendingTimeout    = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
+		segmentPendingTimeout    = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "claimed but uncommitted pending segments are failed after this long")
 		storePath                = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
 		segmentConsumers         = flagset.Int("store.segment-consumers", 1, "concurrent segment consumers")
 		segmentTargetSize        = flagset.Int64("store.segment-target-size", 32*1024*1024, "try to keep store segments about this size")
@@ -45,6 +45,7 @@ func runIngestStore(args []string) error {
 		clusterPeers             = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
+	flagset.Usage = usageFor(flagset, "oklog ingeststore [flags]")
 	if err := flagset.Parse(args); err != nil {
 		return err
 	}

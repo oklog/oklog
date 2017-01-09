@@ -18,6 +18,7 @@ func runTestService(args []string) error {
 		size = flagset.Int("size", 512, "bytes per record")
 		rate = flagset.Int("rate", 5, "records per second")
 	)
+	flagset.Usage = usageFor(flagset, "oklog testsvc [flags]")
 	if err := flagset.Parse(args); err != nil {
 		return err
 	}

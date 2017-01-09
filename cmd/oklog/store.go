@@ -37,6 +37,7 @@ func runStore(args []string) error {
 		clusterPeers             = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
+	flagset.Usage = usageFor(flagset, "oklog store [flags]")
 	if err := flagset.Parse(args); err != nil {
 		return err
 	}

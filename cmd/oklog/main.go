@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -11,13 +12,15 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: %s <mode> [flags]\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "USAGE\n")
+	fmt.Fprintf(os.Stderr, "  %s <mode> [flags]\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "\n")
 	fmt.Fprintf(os.Stderr, "MODES\n")
 	fmt.Fprintf(os.Stderr, "  forward      Forwarding agent\n")
@@ -73,6 +76,9 @@ func (ss stringset) Set(s string) error {
 }
 
 func (ss stringset) String() string {
+	if len(ss) <= 0 {
+		return "<addr>"
+	}
 	return strings.Join(ss.slice(), ", ")
 }
 
@@ -143,4 +149,19 @@ func registerProfile(mux *http.ServeMux) {
 	mux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
 	mux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
 	mux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+}
+
+func usageFor(fs *flag.FlagSet, short string) func() {
+	return func() {
+		fmt.Fprintf(os.Stderr, "USAGE\n")
+		fmt.Fprintf(os.Stderr, "  %s\n", short)
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "FLAGS\n")
+		w := tabwriter.NewWriter(os.Stderr, 0, 2, 2, ' ', 0)
+		fs.VisitAll(func(f *flag.Flag) {
+			fmt.Fprintf(w, "\t-%s %s\t%s\n", f.Name, f.DefValue, f.Usage)
+		})
+		w.Flush()
+		fmt.Fprintf(os.Stderr, "\n")
+	}
 }

@@ -38,11 +38,12 @@ func runIngest(args []string) error {
 		ingestPath            = flagset.String("ingest.path", filepath.Join("data", "ingest"), "path holding segment files for ingest tier")
 		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", 32*1024*1024, "flush segments after they grow to this size")
 		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
-		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "pending segments that are claimed but uncommitted are failed after this long")
+		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "claimed but uncommitted pending segments are failed after this long")
 		filesystem            = flagset.String("filesystem", "real", "real, real-mmap, virtual, nop")
 		clusterPeers          = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
+	flagset.Usage = usageFor(flagset, "oklog ingest [flags]")
 	if err := flagset.Parse(args); err != nil {
 		return err
 	}

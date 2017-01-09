@@ -18,7 +18,7 @@ import (
 func runQuery(args []string) error {
 	flagset := flag.NewFlagSet("query", flag.ExitOnError)
 	var (
-		storeAddr = flagset.String("store", "localhost:7650", "okstore instance")
+		storeAddr = flagset.String("store", "localhost:7650", "address of store instance to query")
 		from      = flagset.String("from", "1h", "from, as RFC3339 timestamp or duration ago")
 		to        = flagset.String("to", "now", "to, as RFC3339 timestamp or duration ago")
 		q         = flagset.String("q", "", "query expression")
@@ -26,6 +26,7 @@ func runQuery(args []string) error {
 		stats     = flagset.Bool("stats", false, "statistics only, no records")
 		nocopy    = flagset.Bool("nocopy", false, "don't read the response body")
 	)
+	flagset.Usage = usageFor(flagset, "oklog query [flags]")
 	if err := flagset.Parse(args); err != nil {
 		return err
 	}
@@ -43,26 +44,26 @@ func runQuery(args []string) error {
 	var fromStr string
 	switch {
 	case fromNow:
-		fromStr = time.Now().Format(time.RFC3339Nano)
+		fromStr = time.Now().Format(time.RFC3339)
 	case durationErr == nil && timeErr != nil:
-		fromStr = time.Now().Add(neg(fromDuration)).Format(time.RFC3339Nano)
+		fromStr = time.Now().Add(neg(fromDuration)).Format(time.RFC3339)
 	case durationErr != nil && timeErr == nil:
-		fromStr = fromTime.Format(time.RFC3339Nano)
+		fromStr = fromTime.Format(time.RFC3339)
 	default:
 		return fmt.Errorf("couldn't parse -from (%q) as either duration or time", *from)
 	}
 
 	toDuration, durationErr := time.ParseDuration(*to)
-	toTime, timeErr := time.Parse(time.RFC3339Nano, *to)
+	toTime, timeErr := time.Parse(time.RFC3339, *to)
 	toNow := strings.ToLower(*to) == "now"
 	var toStr string
 	switch {
 	case toNow:
-		toStr = time.Now().Format(time.RFC3339Nano)
+		toStr = time.Now().Format(time.RFC3339)
 	case durationErr == nil && timeErr != nil:
-		toStr = time.Now().Add(neg(toDuration)).Format(time.RFC3339Nano)
+		toStr = time.Now().Add(neg(toDuration)).Format(time.RFC3339)
 	case durationErr != nil && timeErr == nil:
-		toStr = toTime.Format(time.RFC3339Nano)
+		toStr = toTime.Format(time.RFC3339)
 	default:
 		return fmt.Errorf("couldn't parse -to (%q) as either duration or time", *to)
 	}
