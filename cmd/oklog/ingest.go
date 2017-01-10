@@ -22,24 +22,34 @@ import (
 )
 
 const (
-	defaultFastPort    = 7651
-	defaultDurablePort = 7652
-	defaultBulkPort    = 7653
+	defaultFastPort                    = 7651
+	defaultDurablePort                 = 7652
+	defaultBulkPort                    = 7653
+	defaultIngestSegmentFlushSize      = 4 * 1024 * 1024
+	defaultIngestSegmentFlushAge       = 3 * time.Second
+	defaultIngestSegmentPendingTimeout = time.Minute
+)
+
+var (
+	defaultFastAddr    = fmt.Sprintf("tcp://0.0.0.0:%d", defaultFastPort)
+	defaultDurableAddr = fmt.Sprintf("tcp://0.0.0.0:%d", defaultDurablePort)
+	defaultBulkAddr    = fmt.Sprintf("tcp://0.0.0.0:%d", defaultBulkPort)
+	defaultIngestPath  = filepath.Join("data", "ingest")
 )
 
 func runIngest(args []string) error {
 	flagset := flag.NewFlagSet("ingest", flag.ExitOnError)
 	var (
-		apiAddr               = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for ingest API")
-		fastAddr              = flagset.String("ingest.fast", fmt.Sprintf("tcp://0.0.0.0:%d", defaultFastPort), "listen address for fast (async) writes")
-		durableAddr           = flagset.String("ingest.durable", fmt.Sprintf("tcp://0.0.0.0:%d", defaultDurablePort), "listen address for durable (sync) writes")
-		bulkAddr              = flagset.String("ingest.bulk", fmt.Sprintf("tcp://0.0.0.0:%d", defaultBulkPort), "listen address for bulk (whole-segment) writes")
-		clusterAddr           = flagset.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
-		ingestPath            = flagset.String("ingest.path", filepath.Join("data", "ingest"), "path holding segment files for ingest tier")
-		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", 32*1024*1024, "flush segments after they grow to this size")
-		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
-		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "claimed but uncommitted pending segments are failed after this long")
-		filesystem            = flagset.String("filesystem", "real", "real, real-mmap, virtual, nop")
+		apiAddr               = flagset.String("api", defaultAPIAddr, "listen address for ingest API")
+		fastAddr              = flagset.String("ingest.fast", defaultFastAddr, "listen address for fast (async) writes")
+		durableAddr           = flagset.String("ingest.durable", defaultDurableAddr, "listen address for durable (sync) writes")
+		bulkAddr              = flagset.String("ingest.bulk", defaultBulkAddr, "listen address for bulk (whole-segment) writes")
+		clusterAddr           = flagset.String("cluster", defaultClusterAddr, "listen address for cluster")
+		ingestPath            = flagset.String("ingest.path", defaultIngestPath, "path holding segment files for ingest tier")
+		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", defaultIngestSegmentFlushSize, "flush segments after they grow to this size")
+		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", defaultIngestSegmentFlushAge, "flush segments after they are active for this long")
+		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", defaultIngestSegmentPendingTimeout, "claimed but uncommitted pending segments are failed after this long")
+		filesystem            = flagset.String("filesystem", defaultFilesystem, "real, real-mmap, virtual, nop")
 		clusterPeers          = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")

@@ -21,7 +21,7 @@ import (
 func runForward(args []string) error {
 	flagset := flag.NewFlagSet("forward", flag.ExitOnError)
 	var (
-		apiAddr = flagset.String("api", fmt.Sprintf("tcp://0.0.0.0:%d", defaultAPIPort), "listen address for forward API (and metrics)")
+		apiAddr = flagset.String("api", defaultAPIAddr, "listen address for forward API (and metrics)")
 	)
 	flagset.Usage = usageFor(flagset, "oklog forward [flags] <ingester> [<ingester>...]")
 	if err := flagset.Parse(args); err != nil {

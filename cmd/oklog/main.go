@@ -66,6 +66,12 @@ func main() {
 const (
 	defaultAPIPort     = 7650
 	defaultClusterPort = 7659
+	defaultFilesystem  = "real"
+)
+
+var (
+	defaultAPIAddr     = fmt.Sprintf("tcp://0.0.0.0:%d", defaultAPIPort)
+	defaultClusterAddr = fmt.Sprintf("tcp://0.0.0.0:%d", defaultClusterPort)
 )
 
 type stringset map[string]struct{}

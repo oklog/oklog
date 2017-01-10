@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,23 +24,23 @@ import (
 func runIngestStore(args []string) error {
 	flagset := flag.NewFlagSet("ingest", flag.ExitOnError)
 	var (
-		apiAddr                  = flagset.String("api", "tcp://0.0.0.0:7650", "listen address for ingest and store APIs")
-		fastAddr                 = flagset.String("ingest.fast", "tcp://0.0.0.0:7651", "listen address for fast (async) writes")
-		durableAddr              = flagset.String("ingest.durable", "tcp://0.0.0.0:7652", "listen address for durable (sync) writes")
-		bulkAddr                 = flagset.String("ingest.bulk", "tcp://0.0.0.0:7653", "listen address for bulk (whole-segment) writes")
-		clusterAddr              = flagset.String("cluster", "tcp://0.0.0.0:7659", "listen address for cluster")
-		ingestPath               = flagset.String("ingest.path", filepath.Join("data", "ingest"), "path holding segment files for ingest tier")
-		segmentFlushSize         = flagset.Int("ingest.segment-flush-size", 32*1024*1024, "flush segments after they grow to this size")
-		segmentFlushAge          = flagset.Duration("ingest.segment-flush-age", 3*time.Second, "flush segments after they are active for this long")
-		segmentPendingTimeout    = flagset.Duration("ingest.segment-pending-timeout", time.Minute, "claimed but uncommitted pending segments are failed after this long")
-		storePath                = flagset.String("store.path", filepath.Join("data", "store"), "path holding segment files for storage tier")
-		segmentConsumers         = flagset.Int("store.segment-consumers", 1, "concurrent segment consumers")
-		segmentTargetSize        = flagset.Int64("store.segment-target-size", 32*1024*1024, "try to keep store segments about this size")
-		segmentBufferSize        = flagset.Int64("store.segment-buffer-size", 1024*1024, "per-segment in-memory read buffer during queries")
-		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", 2, "how many copies of each segment to replicate")
-		segmentRetain            = flagset.Duration("store.segment-retain", 7*24*time.Hour, "retention period for segment files")
-		segmentPurge             = flagset.Duration("store.segment-purge", 24*time.Hour, "purge deleted segment files after this long")
-		filesystem               = flagset.String("filesystem", "real", "real, real-mmap, virtual, nop")
+		apiAddr                  = flagset.String("api", defaultAPIAddr, "listen address for ingest and store APIs")
+		fastAddr                 = flagset.String("ingest.fast", defaultFastAddr, "listen address for fast (async) writes")
+		durableAddr              = flagset.String("ingest.durable", defaultDurableAddr, "listen address for durable (sync) writes")
+		bulkAddr                 = flagset.String("ingest.bulk", defaultBulkAddr, "listen address for bulk (whole-segment) writes")
+		clusterAddr              = flagset.String("cluster", defaultClusterAddr, "listen address for cluster")
+		ingestPath               = flagset.String("ingest.path", defaultIngestPath, "path holding segment files for ingest tier")
+		segmentFlushSize         = flagset.Int("ingest.segment-flush-size", defaultIngestSegmentFlushSize, "flush segments after they grow to this size")
+		segmentFlushAge          = flagset.Duration("ingest.segment-flush-age", defaultIngestSegmentFlushAge, "flush segments after they are active for this long")
+		segmentPendingTimeout    = flagset.Duration("ingest.segment-pending-timeout", defaultIngestSegmentPendingTimeout, "claimed but uncommitted pending segments are failed after this long")
+		storePath                = flagset.String("store.path", defaultStorePath, "path holding segment files for storage tier")
+		segmentConsumers         = flagset.Int("store.segment-consumers", defaultStoreSegmentConsumers, "concurrent segment consumers")
+		segmentTargetSize        = flagset.Int64("store.segment-target-size", defaultStoreSegmentTargetSize, "try to keep store segments about this size")
+		segmentBufferSize        = flagset.Int64("store.segment-buffer-size", defaultStoreSegmentBufferSize, "per-segment in-memory read buffer during queries")
+		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", defaultStoreSegmentReplicationFactor, "how many copies of each segment to replicate")
+		segmentRetain            = flagset.Duration("store.segment-retain", defaultStoreSegmentRetain, "retention period for segment files")
+		segmentPurge             = flagset.Duration("store.segment-purge", defaultStoreSegmentPurge, "purge deleted segment files after this long")
+		filesystem               = flagset.String("filesystem", defaultFilesystem, "real, real-mmap, virtual, nop")
 		clusterPeers             = stringset{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
