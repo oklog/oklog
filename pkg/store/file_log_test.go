@@ -9,7 +9,7 @@ func TestChooseFirstSequential(t *testing.T) {
 	t.Parallel()
 
 	const targetSize = 100 * 1024 // 100KB
-	for i, testcase := range []struct {
+	for _, testcase := range []struct {
 		name    string
 		input   []segmentInfo
 		minimum int
