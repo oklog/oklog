@@ -145,7 +145,7 @@ func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, 
 			// A batch of one can be read straight thru.
 			f, err := fs.Open(batch[0])
 			if err != nil {
-				return nil, sz, err // TODO(pb): don't leak FDs
+				return nil, sz, err
 			}
 			rcs = append(rcs, newConcurrentFilteringReadCloser(f, pass, bufsz))
 			sz += f.Size()
@@ -154,11 +154,11 @@ func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, 
 			// A batch of N requires a K-way merge.
 			cfrcs, batchsz, err := makeConcurrentFilteringReadClosers(fs, batch, pass, bufsz)
 			if err != nil {
-				return nil, sz, err // TODO(pb): don't leak FDs
+				return nil, sz, err
 			}
 			rc, err := newMergeReadCloser(cfrcs)
 			if err != nil {
-				return nil, sz, err // TODO(pb): don't leak FDs
+				return nil, sz, err
 			}
 			rcs = append(rcs, rc)
 			sz += batchsz
