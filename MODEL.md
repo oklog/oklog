@@ -1,4 +1,11 @@
-# Queueing theory
+# Model
+
+This is a very preliminary braindump on some ideas for a system model.
+I am no academic, and it's been a long time since I've taken my queueing theory class.
+This is all unvalidated, and may be wildly off-base.
+I welcome corrections with an open heart and mind.
+
+## Queueing theory
 
 First, [an introduction to some queueing theory](http://www.perfdynamics.com/Tools/PDQ.html).
 
@@ -29,7 +36,7 @@ For testing we can reasonably fix λ to some constant value.
 In contrast, S will be a function of the size of the work unit (record).
 For now let's fix each record at N bytes. Then, S = f(N).
 
-# System model
+## Our components
 
 - Producer — Forward — Ingest — Store
 
