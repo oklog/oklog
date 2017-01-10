@@ -81,8 +81,8 @@ func (log *fileLog) Oldest() (ReadSegment, error) {
 
 	f, err := log.fs.Open(newname)
 	if err != nil {
-		if err := log.fs.Rename(newname, chosen); err != nil {
-			panic(err)
+		if renameErr := log.fs.Rename(newname, chosen); renameErr != nil {
+			panic(renameErr)
 		}
 		return nil, err
 	}

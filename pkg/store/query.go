@@ -156,11 +156,11 @@ func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, 
 			if err != nil {
 				return nil, sz, err
 			}
-			rc, err := newMergeReadCloser(cfrcs)
+			mrc, err := newMergeReadCloser(cfrcs)
 			if err != nil {
 				return nil, sz, err
 			}
-			rcs = append(rcs, rc)
+			rcs = append(rcs, mrc)
 			sz += batchsz
 		}
 	}

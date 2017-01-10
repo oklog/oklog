@@ -138,8 +138,8 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 	defer func() {
 		// Don't leak active segments.
 		if writeSegment != nil {
-			if err := writeSegment.Delete(); err != nil {
-				panic(err)
+			if deleteErr := writeSegment.Delete(); deleteErr != nil {
+				panic(deleteErr)
 			}
 		}
 	}()
