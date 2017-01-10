@@ -52,7 +52,7 @@ func TestChooseFirstSequential(t *testing.T) {
 		t.Run(testcase.name, func(t *testing.T) {
 			have := chooseFirstSequential(testcase.input, testcase.minimum, targetSize)
 			if want := testcase.want; !reflect.DeepEqual(want, have) {
-				t.Fatalf("want %v, have %v", i, want, have)
+				t.Fatalf("want %v, have %v", want, have)
 			}
 		})
 	}
