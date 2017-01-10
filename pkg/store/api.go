@@ -22,8 +22,6 @@ const (
 	APIPathClusterState  = "/_clusterstate"
 )
 
-const internalQueryPath = "/_query"
-
 // API serves the store API.
 type API struct {
 	peer               *cluster.Peer
