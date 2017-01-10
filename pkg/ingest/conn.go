@@ -133,7 +133,9 @@ func (m *connectionManager) remove(conn net.Conn) {
 
 func (m *connectionManager) shutdown() {
 	m.closeAllConnections()
-	for range time.Tick(50 * time.Millisecond) {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
 		if m.isEmpty() {
 			return
 		}

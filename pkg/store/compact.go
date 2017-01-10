@@ -50,10 +50,11 @@ func (c *Compacter) Run() {
 		func() { c.moveToTrash() },
 		func() { c.emptyTrash() },
 	}
-	ticker := time.Tick(time.Second)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-ticker:
+		case <-ticker.C:
 			ops[0]()                      // execute
 			ops = append(ops[1:], ops[0]) // shift
 

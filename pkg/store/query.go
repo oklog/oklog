@@ -152,11 +152,11 @@ func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, 
 
 		default:
 			// A batch of N requires a K-way merge.
-			rcs, batchsz, err := makeConcurrentFilteringReadClosers(fs, batch, pass, bufsz)
+			cfrcs, batchsz, err := makeConcurrentFilteringReadClosers(fs, batch, pass, bufsz)
 			if err != nil {
 				return nil, sz, err // TODO(pb): don't leak FDs
 			}
-			rc, err := newMergeReadCloser(rcs)
+			rc, err := newMergeReadCloser(cfrcs)
 			if err != nil {
 				return nil, sz, err // TODO(pb): don't leak FDs
 			}

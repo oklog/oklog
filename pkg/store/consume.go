@@ -72,11 +72,12 @@ func NewConsumer(
 // Run consumes segments from ingest nodes, and replicates them to the cluster.
 // Run returns when Stop is invoked.
 func (c *Consumer) Run() {
-	step := time.Tick(100 * time.Millisecond)
+	step := time.NewTicker(100 * time.Millisecond)
+	defer step.Stop()
 	state := c.gather
 	for {
 		select {
-		case <-step:
+		case <-step.C:
 			state = state()
 
 		case q := <-c.stop:
