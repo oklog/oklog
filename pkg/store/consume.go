@@ -133,7 +133,7 @@ func (c *Consumer) gather() stateFn {
 	const maxAge = time.Second // TODO(pb): parameterize?
 	var (
 		tooBig = int64(c.active.Len()) > c.segmentTargetSize
-		tooOld = !c.activeSince.IsZero() && time.Now().Sub(c.activeSince) > maxAge
+		tooOld = !c.activeSince.IsZero() && time.Since(c.activeSince) > maxAge
 	)
 	if tooBig || tooOld {
 		return c.replicate
