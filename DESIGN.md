@@ -241,6 +241,17 @@ Same as before, this is OK: over-replicated records will be deduplicated at read
 If the query node fails during the commit stage, one or more ingest segments will be stuck in pending and, again, eventually time out back to flushed.
 Same as before, records will become over-replicated, deduplicated at read time, and eventually compacted.
 
+## Node failure
+
+If an ingest node fails permanently, any records in its segments are lost.
+To protect against this class of failure, clients should use the bulk ingest mode.
+That won't allow progress until the segment file is replicated into the storage tier.
+
+If a store node fails permanently, records are safe on (replication factor - 1) other nodes.
+But to get the lost records back up to the desired replication factor, read repair is required.
+A special timespace walking process can be run to perform this recovery.
+It can essentially query all logs from the beginning of time, and perform read repair on the underreplicated records.
+
 ## Query index
 
 All queries are time-bounded, and segments are written in time-order.
