@@ -23,7 +23,8 @@ import (
 
 const (
 	defaultStoreSegmentConsumers         = 1
-	defaultStoreSegmentTargetSize        = 64 * 1024 * 1024
+	defaultStoreSegmentTargetSize        = 128 * 1024 * 1024
+	defaultStoreSegmentTargetAge         = 3 * time.Second
 	defaultStoreSegmentBufferSize        = 1024 * 1024
 	defaultStoreSegmentReplicationFactor = 2
 	defaultStoreSegmentRetain            = 7 * 24 * time.Hour
@@ -42,6 +43,7 @@ func runStore(args []string) error {
 		storePath                = flagset.String("store.path", defaultStorePath, "path holding segment files for storage tier")
 		segmentConsumers         = flagset.Int("store.segment-consumers", defaultStoreSegmentConsumers, "concurrent segment consumers")
 		segmentTargetSize        = flagset.Int64("store.segment-target-size", defaultStoreSegmentTargetSize, "try to keep store segments about this size")
+		segmentTargetAge         = flagset.Duration("store.segment-target-age", defaultStoreSegmentTargetAge, "replicate once the aggregate segment is this old")
 		segmentBufferSize        = flagset.Int64("store.segment-buffer-size", defaultStoreSegmentBufferSize, "per-segment in-memory read buffer during queries")
 		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", defaultStoreSegmentReplicationFactor, "how many copies of each segment to replicate")
 		segmentRetain            = flagset.Duration("store.segment-retain", defaultStoreSegmentRetain, "retention period for segment files")
@@ -215,6 +217,7 @@ func runStore(args []string) error {
 			peer,
 			httpClient,
 			*segmentTargetSize,
+			*segmentTargetAge,
 			*segmentReplicationFactor,
 			consumedSegments,
 			consumedBytes,

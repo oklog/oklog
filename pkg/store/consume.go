@@ -27,6 +27,7 @@ type Consumer struct {
 	peer               *cluster.Peer
 	client             *http.Client
 	segmentTargetSize  int64
+	segmentTargetAge   time.Duration
 	replicationFactor  int
 	gatherErrors       int                 // heuristic to move out of gather state
 	pending            map[string][]string // ingester: segment IDs
@@ -46,6 +47,7 @@ func NewConsumer(
 	peer *cluster.Peer,
 	client *http.Client,
 	segmentTargetSize int64,
+	segmentTargetAge time.Duration,
 	replicationFactor int,
 	consumedSegments, consumedBytes prometheus.Counter,
 	replicatedSegments, replicatedBytes prometheus.Counter,
@@ -55,6 +57,7 @@ func NewConsumer(
 		peer:               peer,
 		client:             client,
 		segmentTargetSize:  segmentTargetSize,
+		segmentTargetAge:   segmentTargetAge,
 		replicationFactor:  replicationFactor,
 		gatherErrors:       0,
 		pending:            map[string][]string{},
@@ -130,10 +133,9 @@ func (c *Consumer) gather() stateFn {
 	}
 
 	// More typical exit clauses.
-	const maxAge = time.Second // TODO(pb): parameterize?
 	var (
 		tooBig = int64(c.active.Len()) > c.segmentTargetSize
-		tooOld = !c.activeSince.IsZero() && time.Since(c.activeSince) > maxAge
+		tooOld = !c.activeSince.IsZero() && time.Since(c.activeSince) > c.segmentTargetAge
 	)
 	if tooBig || tooOld {
 		return c.replicate

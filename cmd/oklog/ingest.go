@@ -25,7 +25,7 @@ const (
 	defaultFastPort                    = 7651
 	defaultDurablePort                 = 7652
 	defaultBulkPort                    = 7653
-	defaultIngestSegmentFlushSize      = 4 * 1024 * 1024
+	defaultIngestSegmentFlushSize      = 16 * 1024 * 1024
 	defaultIngestSegmentFlushAge       = 3 * time.Second
 	defaultIngestSegmentPendingTimeout = time.Minute
 )
