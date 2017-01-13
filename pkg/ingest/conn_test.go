@@ -11,7 +11,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/oklog/prototype/pkg/fs"
+	"github.com/oklog/oklog/pkg/fs"
 )
 
 func TestHandleConnectionsCleanup(t *testing.T) {

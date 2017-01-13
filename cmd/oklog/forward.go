@@ -21,7 +21,7 @@ import (
 func runForward(args []string) error {
 	flagset := flag.NewFlagSet("forward", flag.ExitOnError)
 	var (
-		apiAddr = flagset.String("api", defaultAPIAddr, "listen address for forward API (and metrics)")
+		apiAddr = flagset.String("api", "", "listen address for forward API (and metrics)")
 	)
 	flagset.Usage = usageFor(flagset, "oklog forward [flags] <ingester> [<ingester>...]")
 	if err := flagset.Parse(args); err != nil {
@@ -67,20 +67,22 @@ func runForward(args []string) error {
 	)
 
 	// For now, just a quick-and-dirty metrics server.
-	apiNetwork, apiAddress, _, _, err := parseAddr(*apiAddr, defaultAPIPort)
-	if err != nil {
-		return err
+	if *apiAddr != "" {
+		apiNetwork, apiAddress, _, _, err := parseAddr(*apiAddr, defaultAPIPort)
+		if err != nil {
+			return err
+		}
+		apiListener, err := net.Listen(apiNetwork, apiAddress)
+		if err != nil {
+			return err
+		}
+		go func() {
+			mux := http.NewServeMux()
+			registerMetrics(mux)
+			registerProfile(mux)
+			panic(http.Serve(apiListener, mux))
+		}()
 	}
-	apiListener, err := net.Listen(apiNetwork, apiAddress)
-	if err != nil {
-		return err
-	}
-	go func() {
-		mux := http.NewServeMux()
-		registerMetrics(mux)
-		registerProfile(mux)
-		panic(http.Serve(apiListener, mux))
-	}()
 
 	// Parse URLs for forwarders.
 	var urls []*url.URL

@@ -12,7 +12,7 @@ import (
 	"github.com/pborman/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/oklog/prototype/pkg/cluster"
+	"github.com/oklog/oklog/pkg/cluster"
 )
 
 // These are the ingest API URL paths.

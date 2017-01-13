@@ -15,10 +15,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/oklog/prototype/pkg/cluster"
-	"github.com/oklog/prototype/pkg/fs"
-	"github.com/oklog/prototype/pkg/group"
-	"github.com/oklog/prototype/pkg/store"
+	"github.com/oklog/oklog/pkg/cluster"
+	"github.com/oklog/oklog/pkg/fs"
+	"github.com/oklog/oklog/pkg/group"
+	"github.com/oklog/oklog/pkg/store"
 )
 
 const (

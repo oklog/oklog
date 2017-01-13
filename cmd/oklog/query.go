@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -12,7 +13,8 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/oklog/prototype/pkg/store"
+	"github.com/oklog/oklog/pkg/store"
+	"github.com/oklog/ulid"
 )
 
 func runQuery(args []string) error {
@@ -23,8 +25,10 @@ func runQuery(args []string) error {
 		to        = flagset.String("to", "now", "to, as RFC3339 timestamp or duration ago")
 		q         = flagset.String("q", "", "query expression")
 		regex     = flagset.Bool("regex", false, "parse -q as regular expression")
-		stats     = flagset.Bool("stats", false, "statistics only, no records")
+		stats     = flagset.Bool("stats", false, "statistics only, no records (implies -v)")
 		nocopy    = flagset.Bool("nocopy", false, "don't read the response body")
+		withulid  = flagset.Bool("ulid", false, "include ULID prefix with each record")
+		verbose   = flagset.Bool("v", false, "verbose output to stderr")
 	)
 	flagset.Usage = usageFor(flagset, "oklog query [flags]")
 	if err := flagset.Parse(args); err != nil {
@@ -32,6 +36,13 @@ func runQuery(args []string) error {
 	}
 
 	begin := time.Now()
+
+	verbosePrintf := func(string, ...interface{}) {}
+	if *verbose || *stats {
+		verbosePrintf = func(format string, args ...interface{}) {
+			fmt.Fprintf(os.Stderr, format, args...)
+		}
+	}
 
 	_, hostport, _, _, err := parseAddr(*storeAddr, defaultAPIPort)
 	if err != nil {
@@ -68,7 +79,7 @@ func runQuery(args []string) error {
 		return fmt.Errorf("couldn't parse -to (%q) as either duration or time", *to)
 	}
 
-	fmt.Fprintf(os.Stderr, "-from %s -to %s\n", fromStr, toStr)
+	verbosePrintf("-from %s -to %s\n", fromStr, toStr)
 
 	method := "GET"
 	if *stats {
@@ -105,18 +116,23 @@ func runQuery(args []string) error {
 		qtype = "regular expression"
 	}
 
-	fmt.Fprintf(os.Stderr, "Response in %s\n", time.Since(begin))
-	fmt.Fprintf(os.Stderr, "Queried from %s\n", result.From)
-	fmt.Fprintf(os.Stderr, "Queried to %s\n", result.To)
-	fmt.Fprintf(os.Stderr, "Queried %s %q\n", qtype, result.Q)
-	fmt.Fprintf(os.Stderr, "%d node(s) queried\n", result.NodesQueried)
-	fmt.Fprintf(os.Stderr, "%d segment(s) queried\n", result.SegmentsQueried)
-	fmt.Fprintf(os.Stderr, "%dB (%dMiB) maximum data set size\n", result.MaxDataSetSize, result.MaxDataSetSize/(1024*1024))
-	fmt.Fprintf(os.Stderr, "%d error(s)\n", result.ErrorCount)
-	fmt.Fprintf(os.Stderr, "%s server-reported duration\n", result.Duration)
+	verbosePrintf("Response in %s\n", time.Since(begin))
+	verbosePrintf("Queried from %s\n", result.From)
+	verbosePrintf("Queried to %s\n", result.To)
+	verbosePrintf("Queried %s %q\n", qtype, result.Q)
+	verbosePrintf("%d node(s) queried\n", result.NodesQueried)
+	verbosePrintf("%d segment(s) queried\n", result.SegmentsQueried)
+	verbosePrintf("%dB (%dMiB) maximum data set size\n", result.MaxDataSetSize, result.MaxDataSetSize/(1024*1024))
+	verbosePrintf("%d error(s)\n", result.ErrorCount)
+	verbosePrintf("%s server-reported duration\n", result.Duration)
 
-	if !*nocopy {
+	switch {
+	case *nocopy:
+		break
+	case *withulid:
 		io.Copy(os.Stdout, result.Records)
+	case !*withulid:
+		io.Copy(os.Stdout, strip(result.Records))
 	}
 	result.Records.Close()
 
@@ -128,4 +144,17 @@ func neg(d time.Duration) time.Duration {
 		d = -d
 	}
 	return d
+}
+
+func strip(r io.Reader) io.Reader {
+	pr, pw := io.Pipe()
+	go func() {
+		s := bufio.NewScanner(r)
+		for s.Scan() {
+			pw.Write(s.Bytes()[ulid.EncodedSize+1:])
+			pw.Write([]byte{'\n'})
+		}
+		pw.CloseWithError(s.Err())
+	}()
+	return pr
 }

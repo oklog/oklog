@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oklog/prototype/pkg/ioext"
-	"github.com/oklog/prototype/pkg/mmap"
+	"github.com/oklog/oklog/pkg/ioext"
+	"github.com/oklog/oklog/pkg/mmap"
 )
 
 const mkdirAllMode = 0755

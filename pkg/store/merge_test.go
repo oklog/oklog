@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oklog/prototype/pkg/fs"
 	"github.com/oklog/ulid"
+
+	"github.com/oklog/oklog/pkg/fs"
 )
 
 func TestMergeRecords(t *testing.T) {

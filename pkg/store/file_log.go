@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oklog/ulid"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 
-	"github.com/oklog/prototype/pkg/fs"
-	"github.com/oklog/ulid"
+	"github.com/oklog/oklog/pkg/fs"
 )
 
 const (

@@ -12,10 +12,10 @@ import (
 
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio"
+	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
 
-	"github.com/oklog/prototype/pkg/fs"
-	"github.com/oklog/ulid"
+	"github.com/oklog/oklog/pkg/fs"
 )
 
 // QueryResult contains statistics about, and matching records for, a query.

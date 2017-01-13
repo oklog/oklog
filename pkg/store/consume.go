@@ -15,8 +15,8 @@ import (
 	level "github.com/go-kit/kit/log/experimental_level"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/oklog/prototype/pkg/cluster"
-	"github.com/oklog/prototype/pkg/ingest"
+	"github.com/oklog/oklog/pkg/cluster"
+	"github.com/oklog/oklog/pkg/ingest"
 )
 
 // Consumer reads segments from the ingesters, and replicates merged segments to
