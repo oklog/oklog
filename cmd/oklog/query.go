@@ -131,7 +131,7 @@ func runQuery(args []string) error {
 		break
 	case *withulid:
 		io.Copy(os.Stdout, result.Records)
-	case !*withulid:
+	default:
 		io.Copy(os.Stdout, strip(result.Records))
 	}
 	result.Records.Close()

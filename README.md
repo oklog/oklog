@@ -1,10 +1,9 @@
 # OK Log
 
-A distributed and coördination-free log management system for big ol' clusters.
+OK Log is a distributed and coördination-free log management system for big ol' clusters.
 
 - [Article motivating the system](https://peter.bourgon.org/ok-log)
 - [Detailed system design](DESIGN.md)
-- [Outstanding issues](/issues)
 
 ## Getting OK Log
 
@@ -81,27 +80,13 @@ Check (TODO) for details.
 
 Querying is an HTTP GET to /query on any of the store nodes.
 OK Log comes with a query tool to make it easier to play with.
-One good thing is to use the -stats flag to first refine your query.
-
-```sh
-$ oklog query -from 2h -to 1h -q myservice -stats
-Response in 22.065674ms
-Queried from 2017-01-01T10:34:56+01:00
-Queried to 2017-01-01T11:34:56+01:00
-Queried normal string "myservice"
-3 node(s) queried
-144 segment(s) queried
-3124542100B (3124MiB) maximum data set size
-0 error(s)
-17.526374ms server-reported duration
-```
-
+One good thing is to first use the -stats flag to refine your query.
 When you're satisfied it's sufficiently constrained, drop -stats to get results.
 
 ```sh
 $ oklog query -from 2h -to 1h -q "myservice.*(WARN|ERROR)" -regex
-2016-01-01 10:34:58 [INFO] [myservice] request_id 187634 -- [WARN] Get /check: HTTP 419 (0B received)
-2016-01-01 10:35:02 [INFO] [myservice] request_id 288211 -- [ERROR] Post /ok: HTTP 500 (0B received)
-2016-01-01 10:35:09 [INFO] [myservice] request_id 291014 -- [WARN] Get /next: HTTP 401 (0B received)
+2016-01-01 10:34:58 [myservice] request_id 187634 -- [WARN] Get /check: HTTP 419 (0B received)
+2016-01-01 10:35:02 [myservice] request_id 288211 -- [ERROR] Post /ok: HTTP 500 (0B received)
+2016-01-01 10:35:09 [myservice] request_id 291014 -- [WARN] Get /next: HTTP 401 (0B received)
  ...
 ```
