@@ -1,4 +1,4 @@
-# OK Log
+<p align="center"><img src="oklog.png" width=500 height=142 alt="OK Log"/></p>
 
 OK Log is a distributed and coördination-free log management system for big ol' clusters.
 It's an on-prem solution that's designed to be a sort of building block: easy to understand, easy to operate, and easy to extend.
@@ -103,3 +103,8 @@ $ oklog query -from 2h -to 1h -q "myservice.*(WARN|ERROR)" -regex
 2016-01-01 10:35:09 [myservice] request_id 291014 -- [WARN] Get /next: HTTP 401 (0B received)
  ...
 ```
+
+<br/>
+<sub><sup><a href="https://thenounproject.com/term/like/594444/">OK icon</a> by
+ <a href="https://thenounproject.com/aathis/">Karthik Srinivas</a> from the
+ <a href="https://thenounproject.com">Noun Project</a></sup></sub>
