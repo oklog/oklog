@@ -105,6 +105,7 @@ $ oklog query -from 2h -to 1h -q "myservice.*(WARN|ERROR)" -regex
 ```
 
 <br/>
-<sub><sup><a href="https://thenounproject.com/term/like/594444/">OK icon</a> by
+<hr/>
+<sub><sup><p align="right"><a href="https://thenounproject.com/term/like/594444/">OK icon</a> by
  <a href="https://thenounproject.com/aathis/">Karthik Srinivas</a> from the
- <a href="https://thenounproject.com">Noun Project</a></sup></sub>
+ <a href="https://thenounproject.com">Noun Project</a></p></sup></sub>
