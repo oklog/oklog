@@ -1,7 +1,7 @@
 # OK Log
 
 OK Log is a distributed and coördination-free log management system for big ol' clusters.
-It's an on-prem solution that's designed to be easy to operate, easy to scale, and easy to extend.
+It's an on-prem solution that's designed to be a sort of building block: easy to understand, easy to operate, and easy to extend.
 
 - [Article motivating the system](https://peter.bourgon.org/ok-log)
 - [Detailed system design](DESIGN.md)
