@@ -1,14 +1,24 @@
 # OK Log
 
 OK Log is a distributed and coördination-free log management system for big ol' clusters.
+It's an on-prem solution that's designed to be easy to operate, easy to scale, and easy to extend.
 
 - [Article motivating the system](https://peter.bourgon.org/ok-log)
 - [Detailed system design](DESIGN.md)
 
+## Is OK Log for me?
+
+You may consider OK Log if...
+
+- You're using a hosted solution like Loggly, and want to move logs on-prem
+- You're using Elasticsearch, but find it unreliable, difficult to operate, or don't use many of its features
+- You're using a custom log pipeline with e.g. Fluentd or Logstash, and having performance problems
+- You just wanna, like, grep your logs, why is this all so complicated?
+
 ## Getting OK Log
 
+OK Log is distributed as a single, statically-linked binary for a variety of target architectures.
 Download the latest release from [the releases page](https://github.com/oklog/oklog/releases).
-OK Log is distributed as a single, statically-linked binary for your target architecture.
 
 ## Quickstart
 
@@ -21,7 +31,7 @@ $ oklog query -from 5m -q Hello
 
 ## Deploying
 
-### Small volume
+### Small installations
 
 If you have relatively small log volume, you can deploy a cluster of identical ingeststore nodes.
 By default, the replication factor is 2, so you need at least 2 nodes.
@@ -44,7 +54,7 @@ You can change things like the log retention period (default 7d),
  and maximum time (age) of various stages of the logging pipeline.
 Most defaults should be sane, but you should always audit for your environment.
 
-### Large volume
+### Large installations
 
 If you have relatively large log volume, you can split the ingest and store (query) responsibilities.
 Ingest nodes make lots of sequential writes, and benefit from fast disks and moderate CPU.
@@ -75,6 +85,9 @@ $ ./myservice | oklog forward ingest1 ingest2
 
 The forwarder lets you do some neat stuff with DNS lookups, load spreading, and so on.
 Check (TODO) for details.
+
+Seamless integration with popular cluster managers, like Kubernetes, is high on the priority list.
+Watch this space for drop-in solutions.
 
 ## Querying
 
