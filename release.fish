@@ -12,9 +12,10 @@ if test (echo $VERSION | grep '^v')
 end
 
 set REV (git rev-parse --short HEAD)
-echo Tagging $REV as $VERSION
-git tag --annotate $VERSION -m "Release v$VERSION"
+echo Tagging $REV as v$VERSION
+git tag --annotate v$VERSION -m "Release v$VERSION"
 echo Be sure to: git push --tags
+echo
 
 set DISTDIR dist/$VERSION
 mkdir -p $DISTDIR
