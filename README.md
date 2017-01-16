@@ -16,10 +16,11 @@ It's an on-prem solution that's designed to be a sort of building block: easy to
 
 You may consider OK Log if...
 
+- You're tailing your logs manually, find it annoying, and want to aggregate them without a lot of fuss
 - You're using a hosted solution like Loggly, and want to move logs on-prem
 - You're using Elasticsearch, but find it unreliable, difficult to operate, or don't use many of its features
 - You're using a custom log pipeline with e.g. Fluentd or Logstash, and having performance problems
-- You just wanna, like, grep your logs, why is this all so complicated?
+- You just wanna, like, grep your logs — why is this all so complicated?
 
 ## Getting OK Log
 
