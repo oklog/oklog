@@ -18,6 +18,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+var version = "dev" // set by release script
+
 func usage() {
 	fmt.Fprintf(os.Stderr, "USAGE\n")
 	fmt.Fprintf(os.Stderr, "  %s <mode> [flags]\n", os.Args[0])
@@ -29,6 +31,9 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  ingeststore  Combination ingest+store node, for small installations\n")
 	fmt.Fprintf(os.Stderr, "  query        Querying commandline tool\n")
 	fmt.Fprintf(os.Stderr, "  testsvc      Test service, emits log lines at a fixed rate\n")
+	fmt.Fprintf(os.Stderr, "\n")
+	fmt.Fprintf(os.Stderr, "VERSION\n")
+	fmt.Fprintf(os.Stderr, "  %s\n", version)
 	fmt.Fprintf(os.Stderr, "\n")
 }
 
