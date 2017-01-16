@@ -22,7 +22,7 @@ import (
 )
 
 func runIngestStore(args []string) error {
-	flagset := flag.NewFlagSet("ingest", flag.ExitOnError)
+	flagset := flag.NewFlagSet("ingeststore", flag.ExitOnError)
 	var (
 		apiAddr                  = flagset.String("api", defaultAPIAddr, "listen address for ingest and store APIs")
 		fastAddr                 = flagset.String("ingest.fast", defaultFastAddr, "listen address for fast (async) writes")
