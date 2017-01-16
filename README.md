@@ -90,9 +90,6 @@ Pipe the stdout/stderr of your service to the forwarder, configured to talk to y
 $ ./myservice | oklog forward ingest1 ingest2
 ```
 
-The forwarder lets you do some neat stuff with DNS lookups, load spreading, and so on.
-Check (TODO) for details.
-
 Seamless integration with popular cluster managers, like Kubernetes, is high on the priority list.
 Watch this space for drop-in solutions.
 
