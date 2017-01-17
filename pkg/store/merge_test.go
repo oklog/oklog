@@ -43,38 +43,38 @@ func TestMergeRecords(t *testing.T) {
 		},
 		{
 			input: [][]string{
-				[]string{u100 + " Foo", u200 + " Bar", u300 + " Baz"},
+				{u100 + " Foo", u200 + " Bar", u300 + " Baz"},
 			},
 			want: []string{u100 + " Foo", u200 + " Bar", u300 + " Baz"},
 		},
 		{
 			input: [][]string{
-				[]string{u100 + " Foo", u200 + " Bar", u300 + " Baz"},
-				[]string{u101 + " Foo", u201 + " Bar", u301 + " Baz"},
+				{u100 + " Foo", u200 + " Bar", u300 + " Baz"},
+				{u101 + " Foo", u201 + " Bar", u301 + " Baz"},
 			},
 			want: []string{u100 + " Foo", u101 + " Foo", u200 + " Bar", u201 + " Bar", u300 + " Baz", u301 + " Baz"},
 		},
 		{
 			input: [][]string{
-				[]string{u100, u200, u300},
-				[]string{u150, u151, u152},
-				[]string{u101, u301, u302},
+				{u100, u200, u300},
+				{u150, u151, u152},
+				{u101, u301, u302},
 			},
 			want: []string{u100, u101, u150, u151, u152, u200, u300, u301, u302},
 		},
 		{
 			input: [][]string{
-				[]string{u100},
-				[]string{u150 + " A", u151},
-				[]string{u101, u149, u150 + " B"},
+				{u100},
+				{u150 + " A", u151},
+				{u101, u149, u150 + " B"},
 			},
 			want: []string{u100, u101, u149, u150 + " A", u151}, // dedupe
 		},
 		{
 			input: [][]string{
-				[]string{u100 + " A", u101 + " A"},
-				[]string{u101 + " B", u149 + " B"},
-				[]string{u149 + " C", u150 + " C"},
+				{u100 + " A", u101 + " A"},
+				{u101 + " B", u149 + " B"},
+				{u149 + " C", u150 + " C"},
 			},
 			want: []string{u100 + " A", u101 + " A", u149 + " B", u150 + " C"}, // more dedupe
 		},
