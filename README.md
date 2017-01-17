@@ -2,7 +2,7 @@
 <img src="oklog.png" width=500 height=142 alt="OK Log"/><br/>
 <a href="https://github.com/oklog/oklog/releases/latest"><img src="https://img.shields.io/github/release/oklog/oklog.svg?style=flat-square"/></a>
 <a href="https://travis-ci.org/oklog/oklog"><img src="https://img.shields.io/travis/oklog/oklog.svg?style=flat-square"/></a>
-<a href="https://goreportcard.com/report/github.com/oklog/oklog"><img src="https://goreportcard.com/badge/github.com/oklog/oklog?style=flat-square"/></a>
+<a href="https://goreportcard.com/report/github.com/oklog/oklog"><img src="https://goreportcard.com/badge/github.com/oklog/oklog?style=flat-square&x=1"/></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square"/></a>
 </p>
 
