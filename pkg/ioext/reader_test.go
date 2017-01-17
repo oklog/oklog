@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oklog/prototype/pkg/ioext"
+	"github.com/oklog/oklog/pkg/ioext"
 )
 
 func TestOffsetReader(t *testing.T) {
