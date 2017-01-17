@@ -1,0 +1,183 @@
+{
+    "memo": "484cd35468b179fbd7450e05cb7cb56b68929f51fe5df5c4e2023c1f895c5838",
+    "projects": [
+        {
+            "name": "github.com/armon/go-metrics",
+            "branch": "master",
+            "revision": "93f237eba9b0602f3e73710416558854a81d9337",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/beorn7/perks",
+            "branch": "master",
+            "revision": "4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9",
+            "packages": [
+                "quantile"
+            ]
+        },
+        {
+            "name": "github.com/djherbis/buffer",
+            "version": "v1.0",
+            "revision": "4972e2bf4a27dbd7c43140c959b85e8c1d2f5536",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/djherbis/nio",
+            "revision": "ef1ef18680a47535b20e3ffcfed28d1bd013ab67",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/go-kit/kit",
+            "branch": "master",
+            "revision": "da918843ac352b1199ee9d69f2e8f748a22fcf42",
+            "packages": [
+                "log",
+                "log/experimental_level"
+            ]
+        },
+        {
+            "name": "github.com/go-logfmt/logfmt",
+            "branch": "master",
+            "revision": "390ab7935ee28ec6b286364bba9b4dd6410cb3d5",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/go-stack/stack",
+            "branch": "master",
+            "revision": "100eb0c0a9c5b306ca2fb4f165df21d80ada4b82",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/golang/protobuf",
+            "branch": "master",
+            "revision": "8ee79997227bf9b34611aee7946ae64735e6fd93",
+            "packages": [
+                "proto"
+            ]
+        },
+        {
+            "name": "github.com/hashicorp/errwrap",
+            "branch": "master",
+            "revision": "7554cd9344cec97297fa6649b055a8c98c2a1e55",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/hashicorp/go-msgpack",
+            "branch": "master",
+            "revision": "fa3f63826f7c23912c15263591e65d54d080b458",
+            "packages": [
+                "codec"
+            ]
+        },
+        {
+            "name": "github.com/hashicorp/go-multierror",
+            "branch": "master",
+            "revision": "ed905158d87462226a13fe39ddf685ea65f1c11f",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/hashicorp/memberlist",
+            "branch": "master",
+            "revision": "9800c50ab79c002353852a9b1095e9591b161513",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/kr/logfmt",
+            "branch": "master",
+            "revision": "b84e30acd515aadc4b783ad4ff83aff3299bdfe0",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/matttproud/golang_protobuf_extensions",
+            "branch": "master",
+            "revision": "c12348ce28de40eed0136aa2b644d0ee0650e56c",
+            "packages": [
+                "pbutil"
+            ]
+        },
+        {
+            "name": "github.com/miekg/dns",
+            "branch": "5966",
+            "revision": "27263c64b13655b9e63c6563e167d215f0830a65",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/oklog/ulid",
+            "version": "v0.3.0",
+            "revision": "d311cb43c92434ec4072dfbbda3400741d0a6337",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/pborman/uuid",
+            "version": "v1.0",
+            "revision": "a97ce2ca70fa5a848076093f05e639a89ca34d06",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/pkg/errors",
+            "version": "v0.8.0",
+            "revision": "3866ebc348c54054262feae422da428fe6cf147d",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "github.com/prometheus/client_golang",
+            "version": "v0.8.0",
+            "revision": "c5b7fccd204277076155f10851dad72b76a49317",
+            "packages": [
+                "prometheus",
+                "prometheus/promhttp"
+            ]
+        },
+        {
+            "name": "github.com/prometheus/client_model",
+            "branch": "master",
+            "revision": "fa8ad6fec33561be4280a8f0514318c79d7f6cb6",
+            "packages": [
+                "go"
+            ]
+        },
+        {
+            "name": "github.com/prometheus/common",
+            "branch": "master",
+            "revision": "dd2f054febf4a6c00f2343686efb775948a8bff4",
+            "packages": [
+                "expfmt",
+                "model"
+            ]
+        },
+        {
+            "name": "github.com/prometheus/procfs",
+            "branch": "master",
+            "revision": "fcdb11ccb4389efb1b210b7ffb623ab71c5fdd60",
+            "packages": [
+                "."
+            ]
+        }
+    ]
+}
