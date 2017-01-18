@@ -1,5 +1,5 @@
 {
-    "memo": "484cd35468b179fbd7450e05cb7cb56b68929f51fe5df5c4e2023c1f895c5838",
+    "memo": "3369fc05fb53f33a7030ef62ba488ade29bde856456f7c2570d233b76710062b",
     "projects": [
         {
             "name": "github.com/armon/go-metrics",
@@ -177,6 +177,14 @@
             "revision": "fcdb11ccb4389efb1b210b7ffb623ab71c5fdd60",
             "packages": [
                 "."
+            ]
+        },
+        {
+            "name": "github.com/prometheus/prometheus",
+            "version": "v1.4.1",
+            "revision": "2a89e8733f240d3cd57a6520b52c36ac4744ce12",
+            "packages": [
+                "util/flock"
             ]
         }
     ]

@@ -102,6 +102,19 @@ func (fs *virtualFilesystem) Walk(root string, walkFn filepath.WalkFunc) error {
 	return nil
 }
 
+func (fs *virtualFilesystem) Lock(path string) (r Releaser, existed bool, err error) {
+	fs.mtx.Lock()
+	defer fs.mtx.Unlock()
+	if _, ok := fs.files[path]; ok {
+		return virtualReleaser(func() error { return fs.Remove(path) }), true, nil
+	}
+
+	// Copy/paste.
+	fs.files[path] = &virtualFile{path, bytes.Buffer{}, time.Now(), time.Now()}
+
+	return virtualReleaser(func() error { return fs.Remove(path) }), false, nil
+}
+
 type virtualFile struct {
 	name  string
 	buf   bytes.Buffer
@@ -128,3 +141,7 @@ func (fi virtualFileInfo) Mode() os.FileMode  { return os.FileMode(0666) }
 func (fi virtualFileInfo) ModTime() time.Time { return fi.mtime }
 func (fi virtualFileInfo) IsDir() bool        { return false }
 func (fi virtualFileInfo) Sys() interface{}   { return nil }
+
+type virtualReleaser func() error
+
+func (r virtualReleaser) Release() error { return r() }

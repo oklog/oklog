@@ -17,6 +17,7 @@ type Filesystem interface {
 	MkdirAll(path string) error
 	Chtimes(path string, atime, mtime time.Time) error
 	Walk(root string, walkFn filepath.WalkFunc) error
+	Lock(path string) (r Releaser, existed bool, err error)
 }
 
 // File is the subset of methods we use on an *os.File.
@@ -27,4 +28,9 @@ type File interface {
 	Name() string
 	Size() int64
 	Sync() error
+}
+
+// Releaser is returned by Lock calls.
+type Releaser interface {
+	Release() error
 }

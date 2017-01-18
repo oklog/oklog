@@ -25,6 +25,8 @@ const (
 	extTrashed = ".trashed"
 
 	ulidTimeSize = 10 // bytes
+
+	lockFile = "LOCK"
 )
 
 var (
@@ -40,31 +42,38 @@ func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBu
 	if err := filesys.MkdirAll(root); err != nil {
 		return nil, err
 	}
-	if err := fs.ClaimLock(filesys, root); err != nil {
-		return nil, err
+	lock := filepath.Join(root, lockFile)
+	r, existed, err := filesys.Lock(lock)
+	if err != nil {
+		return nil, errors.Wrapf(err, "locking %s", lock)
+	}
+	if existed {
+		return nil, errors.Errorf("%s already exists; another process is running, or the file is stale", lock)
 	}
 	return &fileLog{
-		fs:                filesys,
 		root:              root,
+		filesys:           filesys,
+		releaser:          r,
 		segmentTargetSize: segmentTargetSize,
 		segmentBufferSize: segmentBufferSize,
 	}, nil
 }
 
 type fileLog struct {
-	fs                fs.Filesystem
 	root              string
+	filesys           fs.Filesystem
+	releaser          fs.Releaser
 	segmentTargetSize int64
 	segmentBufferSize int64
 }
 
 func (log *fileLog) Create() (WriteSegment, error) {
 	filename := filepath.Join(log.root, fmt.Sprintf("%s%s", uuid.New(), extActive))
-	f, err := log.fs.Create(filename)
+	f, err := log.filesys.Create(filename)
 	if err != nil {
 		return nil, err
 	}
-	return &fileWriteSegment{log.fs, f}, nil
+	return &fileWriteSegment{log.filesys, f}, nil
 }
 
 func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (QueryResult, error) {
@@ -89,7 +98,7 @@ func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (
 	}
 
 	// Build the lazy reader.
-	rc, sz, err := newQueryReadCloser(log.fs, segments, pass, log.segmentBufferSize)
+	rc, sz, err := newQueryReadCloser(log.filesys, segments, pass, log.segmentBufferSize)
 	if err != nil {
 		return QueryResult{}, err
 	}
@@ -174,7 +183,7 @@ func (log *fileLog) Overlapping() ([]ReadSegment, error) {
 	// Create ReadSegments.
 	readSegments := make([]ReadSegment, len(candidates))
 	for i, path := range candidates {
-		readSegment, err := newFileReadSegment(log.fs, path)
+		readSegment, err := newFileReadSegment(log.filesys, path)
 		if err != nil {
 			return nil, err
 		}
@@ -218,7 +227,7 @@ func (log *fileLog) Sequential() ([]ReadSegment, error) {
 	// Create ReadSegments.
 	readSegments := make([]ReadSegment, len(candidates))
 	for i, path := range candidates {
-		readSegment, err := newFileReadSegment(log.fs, path)
+		readSegment, err := newFileReadSegment(log.filesys, path)
 		if err != nil {
 			return nil, err
 		}
@@ -259,7 +268,7 @@ func (log *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
 	// We have some candidates. Create and return ReadSegments.
 	readSegments := make([]ReadSegment, len(candidates))
 	for i, path := range candidates {
-		readSegment, err := newFileReadSegment(log.fs, path)
+		readSegment, err := newFileReadSegment(log.filesys, path)
 		if err != nil {
 			return nil, err
 		}
@@ -293,11 +302,11 @@ func (log *fileLog) Purgeable(oldestModTime time.Time) ([]TrashSegment, error) {
 	// We have some candidates. Create and return TrashSegments.
 	trashSegments := make([]TrashSegment, len(candidates))
 	for i, path := range candidates {
-		f, err := log.fs.Open(path)
+		f, err := log.filesys.Open(path)
 		if err != nil {
 			return nil, errors.Wrap(err, "opening candidate segment for read")
 		}
-		trashSegments[i] = fileTrashSegment{log.fs, f}
+		trashSegments[i] = fileTrashSegment{log.filesys, f}
 	}
 	return trashSegments, nil
 }
@@ -331,7 +340,7 @@ func (log *fileLog) Stats() (LogStats, error) {
 }
 
 func (log *fileLog) Close() error {
-	return fs.ReleaseLock(log.fs, log.root)
+	return log.releaser.Release()
 }
 
 func recordFilterPlain(from, to ulid.ULID, q []byte) recordFilter {

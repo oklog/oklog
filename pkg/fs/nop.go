@@ -20,6 +20,7 @@ func (nopFilesystem) Exists(path string) bool                           { return
 func (nopFilesystem) MkdirAll(path string) error                        { return nil }
 func (nopFilesystem) Chtimes(path string, atime, mtime time.Time) error { return nil }
 func (nopFilesystem) Walk(root string, walkFn filepath.WalkFunc) error  { return nil }
+func (nopFilesystem) Lock(path string) (Releaser, bool, error)          { return nopReleaser{}, false, nil }
 
 type nopFile struct{}
 
@@ -29,3 +30,7 @@ func (nopFile) Close() error                { return nil }
 func (nopFile) Name() string                { return "" }
 func (nopFile) Size() int64                 { return 0 }
 func (nopFile) Sync() error                 { return nil }
+
+type nopReleaser struct{}
+
+func (nopReleaser) Release() error { return nil }
