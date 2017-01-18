@@ -1,13 +1,13 @@
 package ingest
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/pborman/uuid"
+	"github.com/pkg/errors"
 
 	"github.com/oklog/oklog/pkg/fs"
 )
@@ -20,12 +20,15 @@ const (
 
 // NewFileLog returns a Log implemented via the filesystem.
 // All filesystem ops will be rooted at path root.
-func NewFileLog(fs fs.Filesystem, root string) (Log, error) {
-	if err := fs.MkdirAll(root); err != nil {
+func NewFileLog(filesys fs.Filesystem, root string) (Log, error) {
+	if err := filesys.MkdirAll(root); err != nil {
+		return nil, err
+	}
+	if err := fs.ClaimLock(filesys, root); err != nil {
 		return nil, err
 	}
 	return &fileLog{
-		fs:   fs,
+		fs:   filesys,
 		root: root,
 	}, nil
 }
@@ -113,6 +116,10 @@ func (log *fileLog) Stats() (LogStats, error) {
 		return nil
 	})
 	return stats, nil
+}
+
+func (log *fileLog) Close() error {
+	return fs.ReleaseLock(log.fs, log.root)
 }
 
 type fileWriteSegment struct {

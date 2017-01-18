@@ -36,12 +36,15 @@ var (
 
 // NewFileLog returns a Log backed by the filesystem at path root.
 // Note that we don't own segment files! They may disappear.
-func NewFileLog(fs fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64) (Log, error) {
-	if err := fs.MkdirAll(root); err != nil {
+func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64) (Log, error) {
+	if err := filesys.MkdirAll(root); err != nil {
+		return nil, err
+	}
+	if err := fs.ClaimLock(filesys, root); err != nil {
 		return nil, err
 	}
 	return &fileLog{
-		fs:                fs,
+		fs:                filesys,
 		root:              root,
 		segmentTargetSize: segmentTargetSize,
 		segmentBufferSize: segmentBufferSize,
@@ -325,6 +328,10 @@ func (log *fileLog) Stats() (LogStats, error) {
 		return nil
 	})
 	return stats, nil
+}
+
+func (log *fileLog) Close() error {
+	return fs.ReleaseLock(log.fs, log.root)
 }
 
 func recordFilterPlain(from, to ulid.ULID, q []byte) recordFilter {
