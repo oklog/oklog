@@ -50,6 +50,9 @@ func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBu
 	if existed {
 		return nil, errors.Errorf("%s already exists; another process is running, or the file is stale", lock)
 	}
+	if err := recoverSegments(filesys, root); err != nil {
+		return nil, errors.Wrap(err, "during recovery")
+	}
 	return &fileLog{
 		root:              root,
 		filesys:           filesys,
@@ -341,6 +344,35 @@ func (log *fileLog) Stats() (LogStats, error) {
 
 func (log *fileLog) Close() error {
 	return log.releaser.Release()
+}
+
+func recoverSegments(filesys fs.Filesystem, root string) error {
+	var toRename []string
+	filesys.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil // recurse
+		}
+		switch filepath.Ext(path) {
+		case extReading, extActive:
+			toRename = append(toRename, path)
+		}
+		return nil
+	})
+	for _, path := range toRename {
+		// It's possible this will create duplicate records.
+		// We rely on repair and compaction to remove them.
+		var (
+			oldname = path
+			newname = modifyExtension(oldname, extFlushed)
+		)
+		if err := filesys.Rename(oldname, newname); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func recordFilterPlain(from, to ulid.ULID, q []byte) recordFilter {

@@ -1,8 +1,11 @@
 package store
 
 import (
+	"os"
 	"reflect"
 	"testing"
+
+	"github.com/oklog/oklog/pkg/fs"
 )
 
 func TestChooseFirstSequential(t *testing.T) {
@@ -55,5 +58,62 @@ func TestChooseFirstSequential(t *testing.T) {
 				t.Fatalf("want %v, have %v", want, have)
 			}
 		})
+	}
+}
+
+func TestRecoverSegments(t *testing.T) {
+	t.Parallel()
+
+	filesys := fs.NewVirtualFilesystem()
+	for _, filename := range []string{
+		"ACTIVE." + extActive,
+		"FLUSHED." + extFlushed,
+		"READING." + extReading,
+		"TRASHED." + extTrashed,
+		"IGNORED.ignored",
+	} {
+		f, err := filesys.Create(filename)
+		if err != nil {
+			t.Fatalf("%s: Create: %v", filename, err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("%s: Close: %v", filename, err)
+		}
+	}
+
+	const (
+		segmentTargetSize = 10 * 1024
+		segmentBufferSize = 1024
+	)
+	filelog, err := NewFileLog(filesys, "", segmentTargetSize, segmentBufferSize)
+	if err != nil {
+		t.Fatalf("NewFileLog: %v", err)
+	}
+	defer filelog.Close()
+
+	files := map[string]bool{
+		// file                  expected
+		"LOCK":                  true,
+		"ACTIVE." + extFlushed:  true,
+		"FLUSHED." + extFlushed: true,
+		"READING." + extFlushed: true,
+		"TRASHED." + extTrashed: true,
+		"IGNORED.ignored":       true,
+	}
+	filesys.Walk("", func(path string, info os.FileInfo, err error) error {
+		if _, ok := files[path]; ok {
+			delete(files, path) // found expected file, great
+		} else {
+			files[path] = false // found unexpected file, oh no
+		}
+		return nil
+	})
+
+	for file, expected := range files {
+		if expected {
+			t.Errorf("didn't find expected file %s", file)
+		} else {
+			t.Errorf("found unexpected file %s", file)
+		}
 	}
 }
