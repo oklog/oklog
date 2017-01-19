@@ -23,6 +23,9 @@
         },
         "github.com/prometheus/client_golang": {
             "version": "v0.8.0"
+        },
+        "github.com/prometheus/prometheus": {
+            "version": "v1.4.1"
         }
     }
 }

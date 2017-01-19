@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/prometheus/util/flock"
+
 	"github.com/oklog/oklog/pkg/ioext"
 	"github.com/oklog/oklog/pkg/mmap"
 )
@@ -76,6 +78,25 @@ func (realFilesystem) Chtimes(path string, atime, mtime time.Time) error {
 
 func (realFilesystem) Walk(root string, walkFn filepath.WalkFunc) error {
 	return filepath.Walk(root, walkFn)
+}
+
+func (realFilesystem) Lock(path string) (r Releaser, existed bool, err error) {
+	r, existed, err = flock.New(path)
+	r = deletingReleaser{path, r}
+	return r, existed, err
+}
+
+type deletingReleaser struct {
+	path string
+	r    Releaser
+}
+
+func (dr deletingReleaser) Release() error {
+	// Remove before Release should be safe, and prevents a race.
+	if err := os.Remove(dr.path); err != nil {
+		return err
+	}
+	return dr.r.Release()
 }
 
 type realFile struct {

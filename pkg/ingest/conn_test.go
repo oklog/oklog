@@ -121,6 +121,7 @@ func (fs *mockFilesystem) Exists(path string) bool                           { r
 func (fs *mockFilesystem) MkdirAll(path string) error                        { return nil }
 func (fs *mockFilesystem) Chtimes(path string, atime, mtime time.Time) error { return nil }
 func (fs *mockFilesystem) Walk(root string, walkFn filepath.WalkFunc) error  { return nil }
+func (fs *mockFilesystem) Lock(string) (fs.Releaser, bool, error)            { return mockReleaser{}, false, nil }
 
 type mockFile struct{ closures *uint64 }
 
@@ -130,3 +131,7 @@ func (f *mockFile) Close() error                { atomic.AddUint64(f.closures, 1
 func (f *mockFile) Name() string                { return "" }
 func (f *mockFile) Size() int64                 { return 0 }
 func (f *mockFile) Sync() error                 { return nil }
+
+type mockReleaser struct{}
+
+func (mockReleaser) Release() error { return nil }

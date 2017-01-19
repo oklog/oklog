@@ -12,6 +12,7 @@ type Log interface {
 	Create() (WriteSegment, error)
 	Oldest() (ReadSegment, error)
 	Stats() (LogStats, error)
+	Close() error
 }
 
 // WriteSegment is a segment that can be written to.

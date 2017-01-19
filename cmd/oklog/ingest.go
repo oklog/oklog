@@ -214,6 +214,11 @@ func runIngest(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err := ingestLog.Close(); err != nil {
+			level.Error(logger).Log("err", err)
+		}
+	}()
 	level.Info(logger).Log("ingest_path", *ingestPath)
 
 	// Create peer.

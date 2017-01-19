@@ -1,13 +1,13 @@
 package ingest
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/pborman/uuid"
+	"github.com/pkg/errors"
 
 	"github.com/oklog/oklog/pkg/fs"
 )
@@ -16,35 +16,50 @@ const (
 	extActive  = ".active"
 	extFlushed = ".flushed"
 	extPending = ".pending"
+
+	lockFile = "LOCK"
 )
 
 // NewFileLog returns a Log implemented via the filesystem.
 // All filesystem ops will be rooted at path root.
-func NewFileLog(fs fs.Filesystem, root string) (Log, error) {
-	if err := fs.MkdirAll(root); err != nil {
+func NewFileLog(filesys fs.Filesystem, root string) (Log, error) {
+	if err := filesys.MkdirAll(root); err != nil {
 		return nil, err
 	}
+	lock := filepath.Join(root, lockFile)
+	r, existed, err := filesys.Lock(lock)
+	if err != nil {
+		return nil, errors.Wrapf(err, "locking %s", lock)
+	}
+	if existed {
+		return nil, errors.Errorf("%s already exists; another process is running, or the file is stale", lock)
+	}
+	if err := recoverSegments(filesys, root); err != nil {
+		return nil, errors.Wrap(err, "during recovery")
+	}
 	return &fileLog{
-		fs:   fs,
-		root: root,
+		root:     root,
+		filesys:  filesys,
+		releaser: r,
 	}, nil
 }
 
 type fileLog struct {
-	fs   fs.Filesystem
-	root string
+	root     string
+	filesys  fs.Filesystem
+	releaser fs.Releaser
 }
 
 // Create returns a new writable segment.
 func (log *fileLog) Create() (WriteSegment, error) {
 	filename := filepath.Join(log.root, fmt.Sprintf("%s%s", uuid.New(), extActive))
 
-	f, err := log.fs.Create(filename)
+	f, err := log.filesys.Create(filename)
 	if err != nil {
 		return nil, err
 	}
 
-	return fileWriteSegment{log.fs, f}, nil
+	return fileWriteSegment{log.filesys, f}, nil
 }
 
 // Oldest returns the oldest flushed segment.
@@ -53,7 +68,7 @@ func (log *fileLog) Oldest() (ReadSegment, error) {
 		oldest = time.Now()
 		chosen string
 	)
-	log.fs.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+	log.filesys.Walk(log.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -75,24 +90,24 @@ func (log *fileLog) Oldest() (ReadSegment, error) {
 	// This can be racy. But if the rename fails, no problem.
 	// Someone else got it; our client can just try again.
 	newname := modifyExtension(chosen, extPending)
-	if err := log.fs.Rename(chosen, newname); err != nil {
+	if err := log.filesys.Rename(chosen, newname); err != nil {
 		return nil, errors.New("race when fetching oldest; please try again")
 	}
 
-	f, err := log.fs.Open(newname)
+	f, err := log.filesys.Open(newname)
 	if err != nil {
-		if renameErr := log.fs.Rename(newname, chosen); renameErr != nil {
+		if renameErr := log.filesys.Rename(newname, chosen); renameErr != nil {
 			panic(renameErr)
 		}
 		return nil, err
 	}
 
-	return fileReadSegment{log.fs, f}, nil
+	return fileReadSegment{log.filesys, f}, nil
 }
 
 func (log *fileLog) Stats() (LogStats, error) {
 	var stats LogStats
-	log.fs.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+	log.filesys.Walk(log.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -113,6 +128,37 @@ func (log *fileLog) Stats() (LogStats, error) {
 		return nil
 	})
 	return stats, nil
+}
+
+func (log *fileLog) Close() error {
+	return log.releaser.Release()
+}
+
+func recoverSegments(filesys fs.Filesystem, root string) error {
+	var toRename []string
+	filesys.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil // recurse
+		}
+		switch filepath.Ext(path) {
+		case extActive, extPending:
+			toRename = append(toRename, path)
+		}
+		return nil
+	})
+	for _, path := range toRename {
+		var (
+			oldname = path
+			newname = modifyExtension(oldname, extFlushed)
+		)
+		if err := filesys.Rename(oldname, newname); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type fileWriteSegment struct {

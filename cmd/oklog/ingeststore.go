@@ -260,6 +260,11 @@ func runIngestStore(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err := ingestLog.Close(); err != nil {
+			level.Error(logger).Log("err", err)
+		}
+	}()
 	level.Info(logger).Log("ingest_path", *ingestPath)
 
 	// Create storelog.
@@ -267,6 +272,11 @@ func runIngestStore(args []string) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if err := storeLog.Close(); err != nil {
+			level.Error(logger).Log("err", err)
+		}
+	}()
 	level.Info(logger).Log("store_path", *storePath)
 
 	// Create peer.

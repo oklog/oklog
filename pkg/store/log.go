@@ -35,6 +35,9 @@ type Log interface {
 
 	// Stats of the current state of the store log.
 	Stats() (LogStats, error)
+
+	// Close the log, releasing any claimed lock.
+	Close() error
 }
 
 // ErrNoSegmentsAvailable is returned by various methods to
