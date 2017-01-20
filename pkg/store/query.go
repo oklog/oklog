@@ -252,7 +252,14 @@ func newConcurrentFilteringReadCloser(src io.ReadCloser, pass recordFilter, bufs
 	r, w := nio.Pipe(buffer.New(bufsz))
 	go func() {
 		defer src.Close() // close the fs.File when we're done reading
-		br := bufio.NewReader(src)
+
+		// ReadSlice will abort with ErrBufferFull if a single line exceeds the
+		// Reader's buffer. We pass bufsz as a quick fix here. An actual, robust
+		// solution would use a dynamic buffer but avoid allocating. Perhaps
+		// Scanner/Bytes would suffice, but we'd need to confirm with a
+		// benchmark.
+		br := bufio.NewReaderSize(src, int(bufsz))
+
 		for {
 			line, err := br.ReadSlice('\n')
 			if err != nil {
