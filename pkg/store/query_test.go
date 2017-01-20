@@ -287,3 +287,23 @@ func TestConcurrentFilteringReadCloser(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue23(t *testing.T) {
+	var (
+		readerBufSize   = 4096 // bufio.go defaultBufSz
+		bigRecordLength = readerBufSize * 2
+		bigRecord       = bytes.Repeat([]byte{'A'}, bigRecordLength)
+		input           = fmt.Sprintf("%s\n%s\n%s\n", "Alpha", bigRecord, "Beta")
+		src             = ioutil.NopCloser(strings.NewReader(input))
+		pass            = func([]byte) bool { return true }
+		pipeBufSz       = 1024 * 1024 // different than bufio.Reader bufsz
+		rc              = newConcurrentFilteringReadCloser(src, pass, int64(pipeBufSz))
+	)
+	output, err := ioutil.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if want, have := input, string(output); want != have {
+		t.Errorf("want %d bytes, have %d bytes", len(want), len(have))
+	}
+}
