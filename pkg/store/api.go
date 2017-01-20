@@ -108,6 +108,15 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 		_, regex = r.URL.Query()["regex"]
 	)
 
+	if _, err := time.Parse(time.RFC3339Nano, from); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, err := time.Parse(time.RFC3339Nano, to); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	method := "GET"
 	if statsOnly {
 		method = "HEAD"
@@ -170,6 +179,9 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 			buf, err := ioutil.ReadAll(response.resp.Body)
 			if err != nil {
 				buf = []byte(err.Error())
+			}
+			if len(buf) == 0 {
+				buf = []byte("unknown")
 			}
 			response.resp.Body.Close()
 			level.Error(a.logger).Log("during", "query_gather", "status_code", response.resp.StatusCode, "err", strings.TrimSpace(string(buf)))
