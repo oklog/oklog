@@ -171,6 +171,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 			if err != nil {
 				buf = []byte(err.Error())
 			}
+			response.resp.Body.Close()
 			level.Error(a.logger).Log("during", "query_gather", "status_code", response.resp.StatusCode, "err", strings.TrimSpace(string(buf)))
 			result.ErrorCount++
 			continue
