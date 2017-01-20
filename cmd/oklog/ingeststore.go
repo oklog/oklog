@@ -418,6 +418,7 @@ func runIngestStore(args []string) error {
 				replicatedSegments.WithLabelValues("ingress"),
 				replicatedBytes.WithLabelValues("ingress"),
 				apiDuration,
+				logger,
 			)))
 			registerMetrics(mux)
 			registerProfile(mux)

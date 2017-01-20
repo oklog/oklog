@@ -3,11 +3,15 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/go-kit/kit/log"
+	level "github.com/go-kit/kit/log/experimental_level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -29,16 +33,18 @@ type API struct {
 	replicatedSegments prometheus.Counter
 	replicatedBytes    prometheus.Counter
 	duration           *prometheus.HistogramVec
+	logger             log.Logger
 }
 
 // NewAPI returns a usable API.
-func NewAPI(peer *cluster.Peer, log Log, replicatedSegments, replicatedBytes prometheus.Counter, duration *prometheus.HistogramVec) *API {
+func NewAPI(peer *cluster.Peer, log Log, replicatedSegments, replicatedBytes prometheus.Counter, duration *prometheus.HistogramVec, logger log.Logger) *API {
 	return &API{
 		peer:               peer,
 		log:                log,
 		replicatedSegments: replicatedSegments,
 		replicatedBytes:    replicatedBytes,
 		duration:           duration,
+		logger:             logger,
 	}
 }
 
@@ -156,11 +162,17 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 	}
 	for _, response := range responses {
 		if response.err != nil {
-			result.ErrorCount++ // TODO(pb): log or record error
+			level.Error(a.logger).Log("during", "query_gather", "err", response.err)
+			result.ErrorCount++
 			continue
 		}
 		if response.resp.StatusCode != http.StatusOK {
-			result.ErrorCount++ // TODO(pb): log or record error
+			buf, err := ioutil.ReadAll(response.resp.Body)
+			if err != nil {
+				buf = []byte(err.Error())
+			}
+			level.Error(a.logger).Log("during", "query_gather", "status_code", response.resp.StatusCode, "err", strings.TrimSpace(string(buf)))
+			result.ErrorCount++
 			continue
 		}
 		var partialResult QueryResult
