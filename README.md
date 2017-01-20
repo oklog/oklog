@@ -110,8 +110,10 @@ $ oklog query -from 2h -to 1h -q "myservice.*(WARN|ERROR)" -regex
 
 ## Further reading
 
-- [Integrations](https://github.com/oklog/oklog/wiki/Integrations)
-  - [Docker](https://github.com/oklog/oklog/wiki/Integrations#docker)
+### Integrations
+
+- [Docker](https://github.com/oklog/oklog/wiki/Integrations#docker)
+- [Kubernetes](https://github.com/oklog/oklog/wiki/Integrations#kubernetes)
 
 ---
 
