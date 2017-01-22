@@ -20,10 +20,12 @@ import (
 
 // These are the store API URL paths.
 const (
-	APIPathUserQuery     = "/query"
-	APIPathInternalQuery = "/_query"
-	APIPathReplicate     = "/replicate"
-	APIPathClusterState  = "/_clusterstate"
+	APIPathUserQuery      = "/query"
+	APIPathInternalQuery  = "/_query"
+	APIPathUserStream     = "/stream"
+	APIPathInternalStream = "/_stream"
+	APIPathReplicate      = "/replicate"
+	APIPathClusterState   = "/_clusterstate"
 )
 
 // API serves the store API.
