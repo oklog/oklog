@@ -191,7 +191,8 @@ func runStore(args []string) error {
 		Help:      "Number of peers in the cluster from this node's perspective.",
 	}, func() float64 { return float64(peer.ClusterSize()) }))
 
-	// Create the HTTP client we'll use to consume segments.
+	// Create the HTTP client we'll use for various purposes.
+	// TODO(pb): audit to see if we need purpose-built clients
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
@@ -261,6 +262,7 @@ func runStore(args []string) error {
 			mux.Handle("/store/", http.StripPrefix("/store", store.NewAPI(
 				peer,
 				storeLog,
+				httpClient,
 				replicatedSegments.WithLabelValues("ingress"),
 				replicatedBytes.WithLabelValues("ingress"),
 				apiDuration,

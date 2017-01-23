@@ -21,8 +21,10 @@ type PeerFactory func() []string
 type ReaderFactory func(context.Context, string) (io.Reader, error)
 
 // Execute creates and maintains streams of records to multiple peers.
+// It blocks until the parent context is canceled.
+// It's designed to be invoked once per user stream request.
+//
 // Incoming records are muxed onto the provided sink chan.
-// Execute blocks until the parent context is canceled.
 // The sleep func is used to backoff between retries of a single peer.
 // The ticker func is used to regularly resolve peers.
 func Execute(
@@ -33,7 +35,7 @@ func Execute(
 	sleep func(time.Duration),
 	ticker func(time.Duration) *time.Ticker,
 ) {
-	// Invoke the peerFactory to get the initial addrs.
+	// Invoke the PeerFactory to get the initial addrs.
 	// Initialize connection managers to each of them.
 	active := updateActive(ctx, nil, pf(), rf, sink, sleep)
 
@@ -68,6 +70,7 @@ func updateActive(
 	// Really, we just have to track the cancel func.
 	nextgen := map[string]func(){}
 
+	// The addrs represent all the connections we *should* have.
 	for _, addr := range addrs {
 		if cancel, ok := prevgen[addr]; ok {
 			// This addr already exists in our previous collection.
@@ -124,7 +127,10 @@ func readOnce(ctx context.Context, rf ReaderFactory, addr string, sink chan<- []
 	return s.Err()
 }
 
-func httpReaderFactory(client *http.Client, addr2url func(string) string) ReaderFactory {
+// HTTPReaderFactory returns a ReaderFactory that converts the addr to a URL via
+// the addr2url function, makes a GET request via the client, and returns the
+// response body as the reader.
+func HTTPReaderFactory(client *http.Client, addr2url func(string) string) ReaderFactory {
 	return func(ctx context.Context, addr string) (io.Reader, error) {
 		req, err := http.NewRequest("GET", addr2url(addr), nil)
 		if err != nil {

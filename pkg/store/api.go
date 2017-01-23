@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/oklog/oklog/pkg/cluster"
+	"github.com/oklog/oklog/pkg/stream"
 )
 
 // These are the store API URL paths.
@@ -32,6 +33,7 @@ const (
 type API struct {
 	peer               *cluster.Peer
 	log                Log
+	client             *http.Client
 	replicatedSegments prometheus.Counter
 	replicatedBytes    prometheus.Counter
 	duration           *prometheus.HistogramVec
@@ -39,10 +41,18 @@ type API struct {
 }
 
 // NewAPI returns a usable API.
-func NewAPI(peer *cluster.Peer, log Log, replicatedSegments, replicatedBytes prometheus.Counter, duration *prometheus.HistogramVec, logger log.Logger) *API {
+func NewAPI(
+	peer *cluster.Peer,
+	log Log,
+	client *http.Client,
+	replicatedSegments, replicatedBytes prometheus.Counter,
+	duration *prometheus.HistogramVec,
+	logger log.Logger,
+) *API {
 	return &API{
 		peer:               peer,
 		log:                log,
+		client:             client,
 		replicatedSegments: replicatedSegments,
 		replicatedBytes:    replicatedBytes,
 		duration:           duration,
@@ -74,6 +84,10 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.handleInternalQuery(w, r, false)
 	case method == "HEAD" && path == APIPathInternalQuery:
 		a.handleInternalQuery(w, r, true)
+	case method == "GET" && path == APIPathUserStream:
+		a.handleUserStream(w, r)
+	case method == "GET" && path == APIPathInternalStream:
+		a.handleInternalStream(w, r)
 	case method == "POST" && path == APIPathReplicate:
 		a.handleReplicate(w, r)
 	case method == "GET" && path == APIPathClusterState:
@@ -103,18 +117,8 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 		return
 	}
 
-	var (
-		from     = r.URL.Query().Get("from")
-		to       = r.URL.Query().Get("to")
-		q        = r.URL.Query().Get("q")
-		_, regex = r.URL.Query()["regex"]
-	)
-
-	if _, err := time.Parse(time.RFC3339Nano, from); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if _, err := time.Parse(time.RFC3339Nano, to); err != nil {
+	query, err := MakeQueryParams(r.URL.Query())
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -124,24 +128,18 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 		method = "HEAD"
 	}
 
-	var asRegex string
-	if regex {
-		asRegex = "&regex=true"
-	}
-
 	var requests []*http.Request
 	for _, hostport := range members {
-		urlStr := fmt.Sprintf(
-			"http://%s/store%s?from=%s&to=%s&q=%s%s",
-			hostport, APIPathInternalQuery,
-			url.QueryEscape(from),
-			url.QueryEscape(to),
-			url.QueryEscape(q),
-			asRegex,
-		)
-		req, err := http.NewRequest(method, urlStr, nil)
+		u, err := url.Parse(fmt.Sprintf("http://%s/store%s", hostport, APIPathInternalQuery))
 		if err != nil {
 			err = errors.Wrapf(err, "constructing URL for %s", hostport)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		query.EncodeTo(u.Query()) // use query directly, no translation needed
+		req, err := http.NewRequest(method, u.String(), nil)
+		if err != nil {
+			err = errors.Wrapf(err, "constructing request for %s", hostport)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -166,10 +164,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 		responses[i] = <-c
 	}
 	result := QueryResult{
-		From:  from,
-		To:    to,
-		Q:     q,
-		Regex: regex,
+		Params: query,
 	}
 	for _, response := range responses {
 		if response.err != nil {
@@ -203,28 +198,97 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 }
 
 func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request, statsOnly bool) {
-	var (
-		fromStr  = r.URL.Query().Get("from")
-		toStr    = r.URL.Query().Get("to")
-		q        = r.URL.Query().Get("q")
-		_, regex = r.URL.Query()["regex"]
-	)
-	from, err := time.Parse(time.RFC3339Nano, fromStr)
+	query, err := MakeQueryParams(r.URL.Query())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	to, err := time.Parse(time.RFC3339Nano, toStr)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	result, err := a.log.Query(from, to, q, regex, statsOnly)
+
+	result, err := a.log.Query(query, statsOnly)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	result.EncodeTo(w)
+}
+
+func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
+	query, err := MakeQueryParams(r.URL.Query())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "can't stream to your client", http.StatusPreconditionFailed)
+		return
+	}
+
+	peerFactory := func() []string {
+		return a.peer.Current(cluster.PeerTypeStore)
+	}
+
+	readerFactory := stream.HTTPReaderFactory(a.client, func(addr string) string {
+		u, err := url.Parse(fmt.Sprintf("http://%s/store%s", addr, APIPathInternalStream))
+		if err != nil {
+			panic(err)
+		}
+		query.EncodeTo(u.Query())
+		return u.String()
+	})
+
+	records := make(chan []byte)
+	go stream.Execute(
+		r.Context(),
+		peerFactory,
+		readerFactory,
+		records,
+		time.Sleep,
+		time.NewTicker,
+	)
+
+	for {
+		select {
+		case record := <-records:
+			w.Write(append(record, '\n'))
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func (a *API) handleInternalStream(w http.ResponseWriter, r *http.Request) {
+	query, err := MakeQueryParams(r.URL.Query())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "can't stream to your client", http.StatusPreconditionFailed)
+		return
+	}
+
+	records := a.log.Stream(r.Context(), query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return // the cancelation is transitive, just need to return
+
+		case record := <-records:
+			fmt.Fprintf(w, "%s\n", record)
+			flusher.Flush()
+		}
+	}
 }
 
 func (a *API) handleReplicate(w http.ResponseWriter, r *http.Request) {

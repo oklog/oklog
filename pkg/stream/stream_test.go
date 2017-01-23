@@ -15,6 +15,7 @@ func TestReadOnce(t *testing.T) {
 	rf := func(ctx context.Context, addr string) (io.Reader, error) {
 		return &ctxReader{ctx, []byte(addr), int32(10 * n)}, nil
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	sink := make(chan []byte)
 	addr := "my.address.co"
@@ -45,6 +46,7 @@ func TestReadUntilCanceled(t *testing.T) {
 	rf := func(ctx context.Context, addr string) (io.Reader, error) {
 		return &ctxReader{ctx, []byte(addr), 1}, nil
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	sink := make(chan []byte)
 	addr := "some.addr.local"
@@ -70,8 +72,8 @@ func TestReadUntilCanceled(t *testing.T) {
 	// Read until the context has been canceled.
 	done := make(chan struct{})
 	go func() {
-		nopSleep := func(time.Duration) { /* no delay pls */ }
-		readUntilCanceled(ctx, rf, "some.addr.local", sink, nopSleep)
+		noSleep := func(time.Duration) { /* no delay pls */ }
+		readUntilCanceled(ctx, rf, "some.addr.local", sink, noSleep)
 		close(done)
 	}()
 	select {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -79,12 +80,13 @@ func (log *fileLog) Create() (WriteSegment, error) {
 	return &fileWriteSegment{log.filesys, f}, nil
 }
 
-func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (QueryResult, error) {
+func (log *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 	var (
-		fromULID = ulid.MustNew(ulid.Timestamp(from), nil)
-		toULID   = ulid.MustNew(ulid.Timestamp(to), nil)
+		begin    = time.Now()
+		fromULID = ulid.MustNew(ulid.Timestamp(qp.From), nil)
+		toULID   = ulid.MustNew(ulid.Timestamp(qp.To), nil)
 		segments = log.queryMatchingSegments(fromULID, toULID)
-		pass     = recordFilterPlain(fromULID, toULID, []byte(q))
+		pass     = recordFilterPlain(fromULID, toULID, []byte(qp.Q))
 	)
 
 	// Time range should be inclusive, so we need a max value here.
@@ -92,8 +94,8 @@ func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (
 		panic(err)
 	}
 
-	if regex {
-		re, err := regexp.Compile(q)
+	if qp.Regex {
+		re, err := regexp.Compile(qp.Q)
 		if err != nil {
 			return QueryResult{}, err
 		}
@@ -110,18 +112,20 @@ func (log *fileLog) Query(from, to time.Time, q string, regex, statsOnly bool) (
 	}
 
 	return QueryResult{
-		From:  from.String(),
-		To:    to.String(),
-		Q:     q,
-		Regex: regex,
+		Params: qp,
 
 		NodesQueried:    1,
 		SegmentsQueried: len(segments),
 		MaxDataSetSize:  sz,
 		ErrorCount:      0,
+		Duration:        time.Since(begin).String(),
 
 		Records: rc,
 	}, nil
+}
+
+func (log *fileLog) Stream(ctx context.Context, q QueryParams) <-chan []byte {
+	return nil // TODO(pb)
 }
 
 func (log *fileLog) Overlapping() ([]ReadSegment, error) {
