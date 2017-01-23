@@ -38,3 +38,109 @@ func TestParseAddr(t *testing.T) {
 		}
 	}
 }
+
+func TestHasNonlocal(t *testing.T) {
+	makeset := func(a ...string) stringset {
+		ss := stringset{}
+		for _, s := range a {
+			ss[s] = struct{}{}
+		}
+		return ss
+	}
+	for _, testcase := range []struct {
+		name  string
+		input stringset
+		want  bool
+	}{
+		{
+			"empty",
+			makeset(),
+			false,
+		},
+		{
+			"127",
+			makeset("127.0.0.9"),
+			false,
+		},
+		{
+			"127 with port",
+			makeset("127.0.0.1:1234"),
+			false,
+		},
+		{
+			"nonlocal IP",
+			makeset("1.2.3.4"),
+			true,
+		},
+		{
+			"nonlocal IP with port",
+			makeset("1.2.3.4:5678"),
+			true,
+		},
+		{
+			"nonlocal host",
+			makeset("foo.corp"),
+			true,
+		},
+		{
+			"nonlocal host with port",
+			makeset("foo.corp:7659"),
+			true,
+		},
+		{
+			"localhost",
+			makeset("localhost"),
+			false,
+		},
+		{
+			"localhost with port",
+			makeset("localhost:1234"),
+			false,
+		},
+		{
+			"multiple IP",
+			makeset("127.0.0.1", "1.2.3.4"),
+			true,
+		},
+		{
+			"multiple hostname",
+			makeset("localhost", "otherhost"),
+			true,
+		},
+		{
+			"multiple local",
+			makeset("localhost", "127.0.0.1", "127.128.129.130:4321", "localhost:10001", "localhost:10002"),
+			false,
+		},
+		{
+			"multiple mixed",
+			makeset("localhost", "127.0.0.1", "129.128.129.130:4321", "localhost:10001", "localhost:10002"),
+			true,
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			if want, have := testcase.want, hasNonlocal(testcase.input); want != have {
+				t.Errorf("want %v, have %v", want, have)
+			}
+		})
+	}
+}
+
+func TestIsUnroutable(t *testing.T) {
+	for _, testcase := range []struct {
+		input string
+		want  bool
+	}{
+		{"0.0.0.0", true},
+		{"127.0.0.1", true},
+		{"127.128.129.130", true},
+		{"localhost", true},
+		{"foo", false},
+	} {
+		t.Run(testcase.input, func(t *testing.T) {
+			if want, have := testcase.want, isUnroutable(testcase.input); want != have {
+				t.Errorf("want %v, have %v", want, have)
+			}
+		})
+	}
+}

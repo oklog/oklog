@@ -42,12 +42,13 @@ $ oklog query -from 5m -q Hello
 
 If you have relatively small log volume, you can deploy a cluster of identical ingeststore nodes.
 By default, the replication factor is 2, so you need at least 2 nodes.
-Let each node know about at least one other node with the -peer flag.
+Use the -cluster flag to specify a routable IP address or hostname for each node to advertise itself on.
+And let each node know about at least one other node with the -peer flag.
 
 ```sh
-foo$ oklog ingeststore -peer foo -peer bar -peer baz
-bar$ oklog ingeststore -peer foo -peer bar -peer baz
-baz$ oklog ingeststore -peer foo -peer bar -peer baz
+foo$ oklog ingeststore -cluster foo -peer foo -peer bar -peer baz
+bar$ oklog ingeststore -cluster bar -peer foo -peer bar -peer baz
+baz$ oklog ingeststore -cluster baz -peer foo -peer bar -peer baz
 ```
 
 To grow the cluster, just add a new node, and tell it about at least one other node via the -peer flag.
@@ -69,12 +70,12 @@ Store nodes make lots of random reads and writes, and benefit from large disks a
 Both ingest and store nodes join the same cluster, so provide them with the same set of peers.
 
 ```sh
-ingest1$ oklog ingest -peer ingest1 -peer ingest2 -peer store1 -peer store2 -peer store3
-ingest2$ oklog ingest -peer ingest1 -peer ingest2 -peer store1 -peer store2 -peer store3
+ingest1$ oklog ingest -cluster 10.1.0.1 -peer ...
+ingest2$ oklog ingest -cluster 10.1.0.2 -peer ...
 
-store1$ oklog store -peer ingest1 -peer ingest2 -peer store1 -peer store2 -peer store3
-store2$ oklog store -peer ingest1 -peer ingest2 -peer store1 -peer store2 -peer store3
-store3$ oklog store -peer ingest1 -peer ingest2 -peer store1 -peer store2 -peer store3
+store1$ oklog store -cluster 10.1.9.1 -peer ...
+store2$ oklog store -cluster 10.1.9.2 -peer ...
+store3$ oklog store -cluster 10.1.9.3 -peer ...
 ```
 
 To add more raw ingest capacity, add more ingest nodes to the cluster.
