@@ -220,6 +220,13 @@ func runIngestStore(args []string) error {
 	}
 	level.Info(logger).Log("cluster", fmt.Sprintf("%s:%d", clusterHost, clusterPort))
 
+	// Safety warning.
+	if hasNonlocal(clusterPeers) && isUnroutable(clusterHost) {
+		level.Warn(logger).Log("err", "this node advertises itself on an unroutable address", "addr", clusterHost)
+		level.Warn(logger).Log("err", "this node will be unreachable in the cluster")
+		level.Warn(logger).Log("err", "provide -cluster as a routable IP address or hostname")
+	}
+
 	// Bind listeners.
 	fastListener, err := net.Listen(fastNetwork, fastAddress)
 	if err != nil {

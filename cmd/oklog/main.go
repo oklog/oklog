@@ -176,3 +176,29 @@ func usageFor(fs *flag.FlagSet, short string) func() {
 		fmt.Fprintf(os.Stderr, "\n")
 	}
 }
+
+func hasNonlocal(clusterPeers stringset) bool {
+	for peer := range clusterPeers {
+		if host, _, err := net.SplitHostPort(peer); err == nil {
+			peer = host
+		}
+		if ip := net.ParseIP(peer); ip != nil && !ip.IsLoopback() {
+			return true
+		} else if ip == nil && strings.ToLower(peer) != "localhost" {
+			return true
+		}
+	}
+	return false
+}
+
+func isUnroutable(clusterHost string) bool {
+	if host, _, err := net.SplitHostPort(clusterHost); err == nil {
+		clusterHost = host
+	}
+	if ip := net.ParseIP(clusterHost); ip != nil && (ip.IsUnspecified() || ip.IsLoopback()) {
+		return true // typically 0.0.0.0 or localhost
+	} else if ip == nil && strings.ToLower(clusterHost) == "localhost" {
+		return true
+	}
+	return false
+}
