@@ -29,26 +29,20 @@ type QueryParams struct {
 	Regex bool      `json:"regex"`
 }
 
-// MakeQueryParams is a bit of sugar for DecodeFrom.
-func MakeQueryParams(values url.Values) (QueryParams, error) {
-	var params QueryParams
-	return params, params.DecodeFrom(values)
-}
-
-// DecodeFrom populates a QueryParams from a set of url.Values.
-func (qp *QueryParams) DecodeFrom(values url.Values) error {
-	from, err := time.Parse(time.RFC3339Nano, values.Get("from"))
+// DecodeFrom populates a QueryParams from a URL.
+func (qp *QueryParams) DecodeFrom(u *url.URL) error {
+	from, err := time.Parse(time.RFC3339Nano, u.Query().Get("from"))
 	if err != nil {
 		return errors.Wrap(err, "parsing 'from'")
 	}
-	to, err := time.Parse(time.RFC3339Nano, values.Get("to"))
+	to, err := time.Parse(time.RFC3339Nano, u.Query().Get("to"))
 	if err != nil {
 		return errors.Wrap(err, "parsing 'to'")
 	}
 	qp.From = from
 	qp.To = to
-	qp.Q = values.Get("q")
-	_, qp.Regex = values["regex"]
+	qp.Q = u.Query().Get("q")
+	_, qp.Regex = u.Query()["regex"]
 	return nil
 }
 
@@ -89,6 +83,22 @@ func (qp *QueryParams) UnmarshalJSON(data []byte) error {
 	qp.Q = intermediary.Q
 	qp.Regex = intermediary.Regex
 	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+// It marshals the times as RFC3339Nano timestamps.
+func (qp *QueryParams) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		From  string `json:"from"`
+		To    string `json:"to"`
+		Q     string `json:"q"`
+		Regex bool   `json:"regex"`
+	}{
+		From:  qp.From.Format(time.RFC3339Nano),
+		To:    qp.To.Format(time.RFC3339Nano),
+		Q:     qp.Q,
+		Regex: qp.Regex,
+	})
 }
 
 // QueryResult contains statistics about, and matching records for, a query.
@@ -407,8 +417,14 @@ func (rc *mergeReadCloser) Read(p []byte) (int, error) {
 		if !rc.ok[i] {
 			continue // already drained
 		}
-		if smallest < 0 || bytes.Compare(rc.id[i], rc.id[smallest]) < 0 {
+		switch {
+		case smallest < 0, bytes.Compare(rc.id[i], rc.id[smallest]) < 0:
 			smallest = i
+		case bytes.Compare(rc.id[i], rc.id[smallest]) == 0: // duplicate
+			if err := rc.advance(i); err != nil {
+				return 0, err
+			}
+			continue
 		}
 	}
 	if smallest < 0 {
