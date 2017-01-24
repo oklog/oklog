@@ -103,6 +103,7 @@ func runQuery(args []string) error {
 	if err != nil {
 		return err
 	}
+	verbosePrintf("GET %s\n", req.URL.String())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -112,14 +113,14 @@ func runQuery(args []string) error {
 	result.DecodeFrom(resp)
 
 	qtype := "normal string"
-	if result.Regex {
+	if result.Params.Regex {
 		qtype = "regular expression"
 	}
 
 	verbosePrintf("Response in %s\n", time.Since(begin))
-	verbosePrintf("Queried from %s\n", result.From)
-	verbosePrintf("Queried to %s\n", result.To)
-	verbosePrintf("Queried %s %q\n", qtype, result.Q)
+	verbosePrintf("Queried from %s\n", result.Params.From)
+	verbosePrintf("Queried to %s\n", result.Params.To)
+	verbosePrintf("Queried %s %q\n", qtype, result.Params.Q)
 	verbosePrintf("%d node(s) queried\n", result.NodesQueried)
 	verbosePrintf("%d segment(s) queried\n", result.SegmentsQueried)
 	verbosePrintf("%dB (%dMiB) maximum data set size\n", result.MaxDataSetSize, result.MaxDataSetSize/(1024*1024))

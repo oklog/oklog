@@ -3,12 +3,15 @@ package store
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio"
@@ -18,18 +21,95 @@ import (
 	"github.com/oklog/oklog/pkg/fs"
 )
 
+// QueryParams defines all dimensions of a query.
+type QueryParams struct {
+	From  time.Time `json:"from"`
+	To    time.Time `json:"to"`
+	Q     string    `json:"q"`
+	Regex bool      `json:"regex"`
+}
+
+// DecodeFrom populates a QueryParams from a URL.
+func (qp *QueryParams) DecodeFrom(u *url.URL) error {
+	from, err := time.Parse(time.RFC3339Nano, u.Query().Get("from"))
+	if err != nil {
+		return errors.Wrap(err, "parsing 'from'")
+	}
+	to, err := time.Parse(time.RFC3339Nano, u.Query().Get("to"))
+	if err != nil {
+		return errors.Wrap(err, "parsing 'to'")
+	}
+	qp.From = from
+	qp.To = to
+	qp.Q = u.Query().Get("q")
+	_, qp.Regex = u.Query()["regex"]
+	return nil
+}
+
+// EncodeTo encodes the QueryParams to the url.Values.
+func (qp *QueryParams) EncodeTo(u *url.URL) {
+	values := url.Values{}
+	values.Set("from", qp.From.Format(time.RFC3339Nano))
+	values.Set("to", qp.To.Format(time.RFC3339Nano))
+	values.Set("q", qp.Q)
+	if qp.Regex {
+		values.Set("regex", "true")
+	}
+	u.RawQuery = values.Encode()
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+// It parses the times as RFC3339Nano timestamps.
+func (qp *QueryParams) UnmarshalJSON(data []byte) error {
+	var intermediary struct {
+		From  string `json:"from"`
+		To    string `json:"to"`
+		Q     string `json:"q"`
+		Regex bool   `json:"regex"`
+	}
+	if err := json.Unmarshal(data, &intermediary); err != nil {
+		return err
+	}
+	from, err := time.Parse(time.RFC3339Nano, intermediary.From)
+	if err != nil {
+		return errors.Wrap(err, "parsing 'from'")
+	}
+	to, err := time.Parse(time.RFC3339Nano, intermediary.To)
+	if err != nil {
+		return errors.Wrap(err, "parsing 'to'")
+	}
+	qp.From = from
+	qp.To = to
+	qp.Q = intermediary.Q
+	qp.Regex = intermediary.Regex
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+// It marshals the times as RFC3339Nano timestamps.
+func (qp *QueryParams) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		From  string `json:"from"`
+		To    string `json:"to"`
+		Q     string `json:"q"`
+		Regex bool   `json:"regex"`
+	}{
+		From:  qp.From.Format(time.RFC3339Nano),
+		To:    qp.To.Format(time.RFC3339Nano),
+		Q:     qp.Q,
+		Regex: qp.Regex,
+	})
+}
+
 // QueryResult contains statistics about, and matching records for, a query.
 type QueryResult struct {
-	From     string `json:"from"`
-	To       string `json:"to"`
-	Q        string `json:"q"`
-	Regex    bool   `json:"regex"`
-	Duration string `json:"duration"`
+	Params QueryParams `json:"query"`
 
-	NodesQueried    int   `json:"nodes_queried"`
-	SegmentsQueried int   `json:"segments_queried"`
-	MaxDataSetSize  int64 `json:"max_data_set_size"`
-	ErrorCount      int   `json:"error_count,omitempty"`
+	NodesQueried    int    `json:"nodes_queried"`
+	SegmentsQueried int    `json:"segments_queried"`
+	MaxDataSetSize  int64  `json:"max_data_set_size"`
+	ErrorCount      int    `json:"error_count,omitempty"`
+	Duration        string `json:"duration"`
 
 	Records io.ReadCloser // TODO(pb): audit to ensure closing is valid throughout
 }
@@ -37,10 +117,10 @@ type QueryResult struct {
 // EncodeTo encodes the QueryResult to the HTTP response writer.
 // It also closes the records ReadCloser.
 func (qr *QueryResult) EncodeTo(w http.ResponseWriter) {
-	w.Header().Set(httpHeaderFrom, qr.From)
-	w.Header().Set(httpHeaderTo, qr.To)
-	w.Header().Set(httpHeaderQ, qr.Q)
-	w.Header().Set(httpHeaderRegex, fmt.Sprint(qr.Regex))
+	w.Header().Set(httpHeaderFrom, qr.Params.From.Format(time.RFC3339))
+	w.Header().Set(httpHeaderTo, qr.Params.To.Format(time.RFC3339))
+	w.Header().Set(httpHeaderQ, qr.Params.Q)
+	w.Header().Set(httpHeaderRegex, fmt.Sprint(qr.Params.Regex))
 
 	w.Header().Set(httpHeaderNodesQueried, strconv.Itoa(qr.NodesQueried))
 	w.Header().Set(httpHeaderSegmentsQueried, strconv.Itoa(qr.SegmentsQueried))
@@ -63,11 +143,15 @@ func (qr *QueryResult) EncodeTo(w http.ResponseWriter) {
 
 // DecodeFrom decodes the QueryResult from the HTTP response.
 func (qr *QueryResult) DecodeFrom(resp *http.Response) error {
-	qr.From = resp.Header.Get(httpHeaderFrom)
-	qr.To = resp.Header.Get(httpHeaderTo)
-	qr.Q = resp.Header.Get(httpHeaderQ)
 	var err error
-	if qr.Regex, err = strconv.ParseBool(resp.Header.Get(httpHeaderRegex)); err != nil {
+	if qr.Params.From, err = time.Parse(time.RFC3339Nano, resp.Header.Get(httpHeaderFrom)); err != nil {
+		return errors.Wrap(err, "from")
+	}
+	if qr.Params.To, err = time.Parse(time.RFC3339Nano, resp.Header.Get(httpHeaderTo)); err != nil {
+		return errors.Wrap(err, "to")
+	}
+	qr.Params.Q = resp.Header.Get(httpHeaderQ)
+	if qr.Params.Regex, err = strconv.ParseBool(resp.Header.Get(httpHeaderRegex)); err != nil {
 		return errors.Wrap(err, "regex")
 	}
 	if qr.NodesQueried, err = strconv.Atoi(resp.Header.Get(httpHeaderNodesQueried)); err != nil {
@@ -333,8 +417,14 @@ func (rc *mergeReadCloser) Read(p []byte) (int, error) {
 		if !rc.ok[i] {
 			continue // already drained
 		}
-		if smallest < 0 || bytes.Compare(rc.id[i], rc.id[smallest]) < 0 {
+		switch {
+		case smallest < 0, bytes.Compare(rc.id[i], rc.id[smallest]) < 0:
 			smallest = i
+		case bytes.Compare(rc.id[i], rc.id[smallest]) == 0: // duplicate
+			if err := rc.advance(i); err != nil {
+				return 0, err
+			}
+			continue
 		}
 	}
 	if smallest < 0 {
