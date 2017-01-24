@@ -103,6 +103,7 @@ func runQuery(args []string) error {
 	if err != nil {
 		return err
 	}
+	verbosePrintf("GET %s\n", req.URL.String())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err

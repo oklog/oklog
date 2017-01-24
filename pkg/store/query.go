@@ -53,13 +53,15 @@ func (qp *QueryParams) DecodeFrom(values url.Values) error {
 }
 
 // EncodeTo encodes the QueryParams to the url.Values.
-func (qp *QueryParams) EncodeTo(values url.Values) {
-	values.Set("from", url.QueryEscape(qp.From.Format(time.RFC3339Nano)))
-	values.Set("to", url.QueryEscape(qp.To.Format(time.RFC3339Nano)))
-	values.Set("q", url.QueryEscape(qp.Q))
+func (qp *QueryParams) EncodeTo(u *url.URL) {
+	values := url.Values{}
+	values.Set("from", qp.From.Format(time.RFC3339Nano))
+	values.Set("to", qp.To.Format(time.RFC3339Nano))
+	values.Set("q", qp.Q)
 	if qp.Regex {
 		values.Set("regex", "true")
 	}
+	u.RawQuery = values.Encode()
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -105,8 +107,8 @@ type QueryResult struct {
 // EncodeTo encodes the QueryResult to the HTTP response writer.
 // It also closes the records ReadCloser.
 func (qr *QueryResult) EncodeTo(w http.ResponseWriter) {
-	w.Header().Set(httpHeaderFrom, qr.Params.From.String())
-	w.Header().Set(httpHeaderTo, qr.Params.To.String())
+	w.Header().Set(httpHeaderFrom, qr.Params.From.Format(time.RFC3339))
+	w.Header().Set(httpHeaderTo, qr.Params.To.Format(time.RFC3339))
 	w.Header().Set(httpHeaderQ, qr.Params.Q)
 	w.Header().Set(httpHeaderRegex, fmt.Sprint(qr.Params.Regex))
 

@@ -136,7 +136,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request, statsOnly 
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		query.EncodeTo(u.Query()) // use query directly, no translation needed
+		query.EncodeTo(u) // use query directly, no translation needed
 		req, err := http.NewRequest(method, u.String(), nil)
 		if err != nil {
 			err = errors.Wrapf(err, "constructing request for %s", hostport)
@@ -235,7 +235,7 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			panic(err)
 		}
-		query.EncodeTo(u.Query())
+		query.EncodeTo(u)
 		return u.String()
 	})
 
