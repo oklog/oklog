@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ type API struct {
 	peer               *cluster.Peer
 	log                Log
 	client             *http.Client
+	streamQueries      *queryRegistry
 	replicatedSegments prometheus.Counter
 	replicatedBytes    prometheus.Counter
 	duration           *prometheus.HistogramVec
@@ -54,11 +56,17 @@ func NewAPI(
 		peer:               peer,
 		log:                log,
 		client:             client,
+		streamQueries:      newQueryRegistry(),
 		replicatedSegments: replicatedSegments,
 		replicatedBytes:    replicatedBytes,
 		duration:           duration,
 		logger:             logger,
 	}
+}
+
+// Close out the API, including the streaming query registry.
+func (a *API) Close() error {
+	return a.streamQueries.Close()
 }
 
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -294,12 +302,10 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 		return u.String()
 	})
 
-	records := make(chan []byte)
-	go stream.Execute(
+	records := stream.Execute(
 		r.Context(),
 		peerFactory,
 		readerFactory,
-		records,
 		time.Sleep,
 		time.NewTicker,
 	)
@@ -328,7 +334,14 @@ func (a *API) handleInternalStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	records := a.log.Stream(r.Context(), qp)
+	pass := recordFilterPlain([]byte(qp.Q))
+	if qp.Regex {
+		pass = recordFilterRegex(regexp.MustCompile(qp.Q))
+	}
+
+	// Whenever new segments get replicated to us, records get matched here.
+	// Canceling the context closes the chan. Eventually.
+	records := a.streamQueries.Register(r.Context(), pass)
 
 	for {
 		select {
@@ -351,7 +364,7 @@ func (a *API) handleReplicate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	low, high, n, err := mergeRecords(segment, r.Body)
+	low, high, n, err := mergeRecords(segment, r.Body) // TODO(pb): unnecessary work!!
 	if err != nil {
 		segment.Delete()
 		http.Error(w, err.Error(), http.StatusInternalServerError)

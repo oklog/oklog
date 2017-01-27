@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"io"
 	"time"
@@ -15,12 +14,7 @@ type Log interface {
 	Create() (WriteSegment, error)
 
 	// Query written and closed segments.
-	// TODO(pb): convert parameters to QueryParams
 	Query(qp QueryParams, statsOnly bool) (QueryResult, error)
-
-	// Register a streaming query, giving results on the result chan.
-	// Canceling the context closes the returned channel.
-	Stream(context.Context, QueryParams) <-chan []byte
 
 	// Overlapping returns segments that have a high degree of time overlap and
 	// can be compacted.

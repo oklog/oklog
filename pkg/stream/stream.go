@@ -21,7 +21,8 @@ type PeerFactory func() []string
 type ReaderFactory func(context.Context, string) (io.Reader, error)
 
 // Execute creates and maintains streams of records to multiple peers.
-// It blocks until the parent context is canceled.
+// It muxes the streams to the returned chan of records.
+// The chan will be closed when the context is canceled.
 // It's designed to be invoked once per user stream request.
 //
 // Incoming records are muxed onto the provided sink chan.
@@ -31,31 +32,40 @@ func Execute(
 	ctx context.Context,
 	pf PeerFactory,
 	rf ReaderFactory,
-	sink chan<- []byte,
 	sleep func(time.Duration),
 	ticker func(time.Duration) *time.Ticker,
-) {
+) <-chan []byte {
+	// Make the sink chan of records.
+	// TODO(pb): validate the buffer size
+	c := make(chan []byte, 1024)
+
 	// Invoke the PeerFactory to get the initial addrs.
 	// Initialize connection managers to each of them.
-	active := updateActive(ctx, nil, pf(), rf, sink, sleep)
+	active := updateActive(ctx, nil, pf(), rf, c, sleep)
 
-	// Re-invoke the peerFactory every second.
-	tk := ticker(time.Second)
-	defer tk.Stop()
+	go func() {
+		// Re-invoke the peerFactory every second.
+		// This catches changes in topology.
+		tk := ticker(time.Second)
+		defer tk.Stop()
 
-	for {
-		select {
-		case <-tk.C:
-			// Detect new peers, and create connection managers for them.
-			// Terminate connection managers for peers that have gone away.
-			active = updateActive(ctx, active, pf(), rf, sink, sleep) // update
+		for {
+			select {
+			case <-tk.C:
+				// Detect new peers, and create connection managers for them.
+				// Terminate connection managers for peers that have gone away.
+				active = updateActive(ctx, active, pf(), rf, c, sleep) // update
 
-		case <-ctx.Done():
-			// Context cancelation is transitive.
-			// We just need to exit.
-			return
+			case <-ctx.Done():
+				// Context cancelation is transitive.
+				// We just need to exit.
+				close(c)
+				return
+			}
 		}
-	}
+	}()
+
+	return c
 }
 
 func updateActive(

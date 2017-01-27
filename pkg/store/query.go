@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,13 @@ func (qp *QueryParams) DecodeFrom(u *url.URL) error {
 	qp.To = to
 	qp.Q = u.Query().Get("q")
 	_, qp.Regex = u.Query()["regex"]
+
+	if qp.Regex {
+		if _, err := regexp.Compile(qp.Q); err != nil {
+			return errors.Wrap(err, "compiling regex")
+		}
+	}
+
 	return nil
 }
 

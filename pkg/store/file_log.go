@@ -2,7 +2,6 @@ package store
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -37,6 +36,14 @@ var (
 	}
 )
 
+type fileLog struct {
+	root              string
+	filesys           fs.Filesystem
+	releaser          fs.Releaser // for the LOCK
+	segmentTargetSize int64
+	segmentBufferSize int64
+}
+
 // NewFileLog returns a Log backed by the filesystem at path root.
 // Note that we don't own segment files! They may disappear.
 func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64) (Log, error) {
@@ -63,14 +70,6 @@ func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBu
 	}, nil
 }
 
-type fileLog struct {
-	root              string
-	filesys           fs.Filesystem
-	releaser          fs.Releaser
-	segmentTargetSize int64
-	segmentBufferSize int64
-}
-
 func (log *fileLog) Create() (WriteSegment, error) {
 	filename := filepath.Join(log.root, fmt.Sprintf("%s%s", uuid.New(), extActive))
 	f, err := log.filesys.Create(filename)
@@ -86,20 +85,16 @@ func (log *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 		fromULID = ulid.MustNew(ulid.Timestamp(qp.From), nil)
 		toULID   = ulid.MustNew(ulid.Timestamp(qp.To), nil)
 		segments = log.queryMatchingSegments(fromULID, toULID)
-		pass     = recordFilterPlain(fromULID, toULID, []byte(qp.Q))
+		pass     = recordFilterBoundedPlain(fromULID, toULID, []byte(qp.Q))
 	)
+
+	if qp.Regex {
+		pass = recordFilterBoundedRegex(fromULID, toULID, regexp.MustCompile(qp.Q))
+	}
 
 	// Time range should be inclusive, so we need a max value here.
 	if err := toULID.SetEntropy(ulidMaxEntropy); err != nil {
 		panic(err)
-	}
-
-	if qp.Regex {
-		re, err := regexp.Compile(qp.Q)
-		if err != nil {
-			return QueryResult{}, err
-		}
-		pass = recordFilterRegex(fromULID, toULID, re)
 	}
 
 	// Build the lazy reader.
@@ -122,10 +117,6 @@ func (log *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 
 		Records: rc,
 	}, nil
-}
-
-func (log *fileLog) Stream(ctx context.Context, q QueryParams) <-chan []byte {
-	return nil // TODO(pb)
 }
 
 func (log *fileLog) Overlapping() ([]ReadSegment, error) {
@@ -379,7 +370,19 @@ func recoverSegments(filesys fs.Filesystem, root string) error {
 	return nil
 }
 
-func recordFilterPlain(from, to ulid.ULID, q []byte) recordFilter {
+func recordFilterPlain(q []byte) recordFilter {
+	return func(b []byte) bool {
+		return len(b) > ulid.EncodedSize && bytes.Contains(b[ulid.EncodedSize+1:], q)
+	}
+}
+
+func recordFilterRegex(q *regexp.Regexp) recordFilter {
+	return func(b []byte) bool {
+		return len(b) > ulid.EncodedSize && q.Match(b[ulid.EncodedSize+1:])
+	}
+}
+
+func recordFilterBoundedPlain(from, to ulid.ULID, q []byte) recordFilter {
 	fromBytes, _ := from.MarshalText()
 	fromBytes = fromBytes[:ulidTimeSize]
 	toBytes, _ := to.MarshalText()
@@ -392,7 +395,7 @@ func recordFilterPlain(from, to ulid.ULID, q []byte) recordFilter {
 	}
 }
 
-func recordFilterRegex(from, to ulid.ULID, q *regexp.Regexp) recordFilter {
+func recordFilterBoundedRegex(from, to ulid.ULID, q *regexp.Regexp) recordFilter {
 	fromBytes, _ := from.MarshalText()
 	fromBytes = fromBytes[:ulidTimeSize]
 	toBytes, _ := to.MarshalText()
