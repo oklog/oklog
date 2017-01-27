@@ -99,6 +99,7 @@ func (qr *queryRegistry) Close() error {
 			if len(qr.reg) <= 0 {
 				return nil // empty, we're done
 			}
+
 		case <-timeout:
 			qr.mtx.Lock()
 			return errors.Errorf("timeout waiting for query registry shutdown; %d remain", len(qr.reg))
@@ -110,31 +111,16 @@ func (qr *queryRegistry) Close() error {
 // The function may block if channel receivers are slow.
 // Perhaps best to run in a goroutine?
 func (qr *queryRegistry) Match(segment []byte) {
-	// Minimize our lock time: copy the currently registered queries.
-	// This should be safe, as everything in queryContext is idempotent.
-	// And the cleanup goroutine closes the chan by reference.
-	reg := func() chanmap {
-		qr.mtx.RLock()
-		defer qr.mtx.RUnlock()
+	qr.mtx.RLock()
+	defer qr.mtx.RUnlock()
 
-		// Don't bother if we don't have any registered queries.
-		if len(qr.reg) <= 0 {
-			return nil
-		}
+	// Don't bother if we don't have any registered queries.
+	if len(qr.reg) <= 0 {
+		return
+	}
 
-		// Don't bother if we're closing.
-		if qr.closing {
-			return nil
-		}
-
-		// Copy, manually.
-		reg := chanmap{}
-		for c, qc := range qr.reg {
-			reg[c] = qc
-		}
-		return reg
-	}()
-	if reg == nil {
+	// Don't bother if we're closing.
+	if qr.closing {
 		return
 	}
 
@@ -142,17 +128,17 @@ func (qr *queryRegistry) Match(segment []byte) {
 	// Send any matches immediately.
 	s := bufio.NewScanner(bytes.NewReader(segment))
 	for s.Scan() {
-		for c, qc := range reg {
+		for c, qc := range qr.reg {
 			if qc.pass(s.Bytes()) {
 				select {
 				case c <- s.Bytes():
 					// It's a good send, Bront.
+
 				case <-qc.done:
 					// We're canceled! The cancelation was also detected by the
 					// cleanup goroutine spawned by Register. That goroutine is in
 					// charge of deregistering the query and closing the chan. For
 					// our part, we should just stop sending records to this chan.
-					delete(reg, c) // our copy
 					continue
 				}
 			}
