@@ -368,7 +368,7 @@ func newConcurrentFilteringReadCloser(src io.ReadCloser, pass recordFilter, bufs
 				w.CloseWithError(err)
 				return
 			}
-			if !pass(line[ulid.EncodedSize+1:]) {
+			if !pass(line) {
 				continue
 			}
 			switch n, err := w.Write(line); {
