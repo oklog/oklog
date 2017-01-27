@@ -129,7 +129,7 @@ func readOnce(ctx context.Context, rf ReaderFactory, addr string, sink chan<- []
 	s := bufio.NewScanner(r)
 	for s.Scan() {
 		select {
-		case sink <- append(s.Bytes(), '\n'):
+		case sink <- s.Bytes():
 		case <-ctx.Done():
 			return ctx.Err()
 		}
