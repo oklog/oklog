@@ -1,6 +1,8 @@
 package store
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	level "github.com/go-kit/kit/log/experimental_level"
+	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -112,12 +115,20 @@ func (iw *interceptingWriter) WriteHeader(code int) {
 	iw.ResponseWriter.WriteHeader(code)
 }
 
+func (iw *interceptingWriter) Flush() {
+	// We always present as if we are a flusher, and squelch flush errors.
+	// TODO(pb): de-hack-ify this
+	if f, ok := iw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 	begin := time.Now()
 
 	// Validate user input.
 	var qp QueryParams
-	if err := qp.DecodeFrom(r.URL); err != nil {
+	if err := qp.DecodeFrom(r.URL, rangeRequired); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -248,7 +259,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request) {
 	var qp QueryParams
-	if err := qp.DecodeFrom(r.URL); err != nil {
+	if err := qp.DecodeFrom(r.URL, rangeRequired); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -270,7 +281,7 @@ func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 	// Validate user input.
 	var qp QueryParams
-	if err := qp.DecodeFrom(r.URL); err != nil {
+	if err := qp.DecodeFrom(r.URL, rangeNotRequired); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -285,7 +296,10 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 		return a.peer.Current(cluster.PeerTypeStore)
 	}
 
-	readerFactory := stream.HTTPReaderFactory(a.client, func(addr string) string {
+	// We need a special client which doesn't time out.
+	oneshot := http.DefaultClient // TODO(pb): further research
+
+	readerFactory := stream.HTTPReaderFactory(oneshot, func(addr string) string {
 		// Copy original URL, to save all the query params, etc.
 		u, err := url.Parse(r.URL.String())
 		if err != nil {
@@ -313,7 +327,8 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case record := <-records:
-			w.Write(append(record, '\n'))
+			w.Write(record)
+			w.Write([]byte{'\n'})
 			flusher.Flush()
 		case <-r.Context().Done():
 			return
@@ -323,7 +338,7 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleInternalStream(w http.ResponseWriter, r *http.Request) {
 	var qp QueryParams
-	if err := qp.DecodeFrom(r.URL); err != nil {
+	if err := qp.DecodeFrom(r.URL, rangeNotRequired); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -339,21 +354,11 @@ func (a *API) handleInternalStream(w http.ResponseWriter, r *http.Request) {
 		pass = recordFilterRegex(regexp.MustCompile(qp.Q))
 	}
 
-	// Whenever new segments get replicated to us, records get matched here.
-	// Canceling the context closes the chan. Eventually.
 	records := a.streamQueries.Register(r.Context(), pass)
-
-	for {
-		select {
-		case record := <-records:
-			fmt.Fprintf(w, "%s\n", record)
-			flusher.Flush()
-
-		case <-r.Context().Done():
-			// Context cancelation is transitive.
-			// We just need to exit.
-			return
-		}
+	for record := range records {
+		w.Write(record)
+		w.Write([]byte{'\n'})
+		flusher.Flush()
 	}
 }
 
@@ -364,7 +369,8 @@ func (a *API) handleReplicate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	low, high, n, err := mergeRecords(segment, r.Body) // TODO(pb): unnecessary work!!
+	var buf bytes.Buffer
+	lo, hi, n, err := teeRecords(r.Body, segment, &buf)
 	if err != nil {
 		segment.Delete()
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -374,10 +380,11 @@ func (a *API) handleReplicate(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "No records")
 		return
 	}
-	if err := segment.Close(low, high); err != nil {
+	if err := segment.Close(lo, hi); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	go a.streamQueries.Match(buf.Bytes()) // TODO(pb): validate `go`
 	a.replicatedSegments.Inc()
 	a.replicatedBytes.Add(float64(n))
 	fmt.Fprintln(w, "OK")
@@ -391,4 +398,30 @@ func (a *API) handleClusterState(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Write(buf)
+}
+
+func teeRecords(src io.Reader, dst ...io.Writer) (lo, hi ulid.ULID, n int, err error) {
+	var (
+		first = true
+		id    ulid.ULID
+		w     = io.MultiWriter(dst...)
+		s     = bufio.NewScanner(src)
+	)
+	for s.Scan() {
+		// ULID and record-count accounting.
+		id.UnmarshalText(s.Bytes()[:ulid.EncodedSize])
+		if first {
+			lo, first = id, false
+		}
+		hi, n = id, n+1
+
+		// Copying.
+		if _, err := w.Write(s.Bytes()); err != nil {
+			return lo, hi, n, err
+		}
+		if _, err := w.Write([]byte{'\n'}); err != nil {
+			return lo, hi, n, err
+		}
+	}
+	return lo, hi, n, s.Err() // EOF yields nil
 }

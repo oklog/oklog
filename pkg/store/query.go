@@ -30,14 +30,21 @@ type QueryParams struct {
 	Regex bool      `json:"regex"`
 }
 
+type rangeBehavior int
+
+const (
+	rangeRequired rangeBehavior = iota
+	rangeNotRequired
+)
+
 // DecodeFrom populates a QueryParams from a URL.
-func (qp *QueryParams) DecodeFrom(u *url.URL) error {
+func (qp *QueryParams) DecodeFrom(u *url.URL, rb rangeBehavior) error {
 	from, err := time.Parse(time.RFC3339Nano, u.Query().Get("from"))
-	if err != nil {
+	if err != nil && rb == rangeRequired {
 		return errors.Wrap(err, "parsing 'from'")
 	}
 	to, err := time.Parse(time.RFC3339Nano, u.Query().Get("to"))
-	if err != nil {
+	if err != nil && rb == rangeRequired {
 		return errors.Wrap(err, "parsing 'to'")
 	}
 	qp.From = from
@@ -362,7 +369,7 @@ func newConcurrentFilteringReadCloser(src io.ReadCloser, pass recordFilter, bufs
 				w.CloseWithError(err)
 				return
 			}
-			if !pass(line) {
+			if !pass(line[ulid.EncodedSize+1:]) {
 				continue
 			}
 			switch n, err := w.Write(line); {

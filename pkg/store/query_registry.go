@@ -1,18 +1,23 @@
 package store
 
 import (
+	"bufio"
+	"bytes"
 	"context"
-	"errors"
 	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 // queryRegistry holds active streaming queries.
 type queryRegistry struct {
 	mtx     sync.RWMutex
-	reg     map[chan<- []byte]queryContext
+	reg     chanmap
 	closing bool
 }
+
+type chanmap map[chan<- []byte]queryContext
 
 type queryContext struct {
 	pass   recordFilter
@@ -22,12 +27,13 @@ type queryContext struct {
 
 func newQueryRegistry() *queryRegistry {
 	return &queryRegistry{
-		reg: map[chan<- []byte]queryContext{},
+		reg: chanmap{},
 	}
 }
 
 // Register a new query. If successful, range over the returned chan for
 // incoming records. If not successful, the returned chan will be nil.
+// Records on the returned chan will NOT have trailing newlines.
 func (qr *queryRegistry) Register(ctx context.Context, pass recordFilter) <-chan []byte {
 	qr.mtx.Lock()
 	defer qr.mtx.Unlock()
@@ -95,7 +101,7 @@ func (qr *queryRegistry) Close() error {
 			}
 		case <-timeout:
 			qr.mtx.Lock()
-			return errors.New("timeout waiting for query registry shutdown")
+			return errors.Errorf("timeout waiting for query registry shutdown; %d remain", len(qr.reg))
 		}
 	}
 }
@@ -103,30 +109,51 @@ func (qr *queryRegistry) Close() error {
 // Match a segment of records against the set of registered queries.
 // The function may block if channel receivers are slow.
 // Perhaps best to run in a goroutine?
-func (qr *queryRegistry) Match(segment [][]byte) {
-	qr.mtx.RLock()
-	defer qr.mtx.RUnlock()
+func (qr *queryRegistry) Match(segment []byte) {
+	// Minimize our lock time: copy the currently registered queries.
+	// This should be safe, as everything in queryContext is idempotent.
+	// And the cleanup goroutine closes the chan by reference.
+	reg := func() chanmap {
+		qr.mtx.RLock()
+		defer qr.mtx.RUnlock()
 
-	// No need to do this work if we don't have any registered queries.
-	if len(qr.reg) <= 0 {
+		// Don't bother if we don't have any registered queries.
+		if len(qr.reg) <= 0 {
+			return nil
+		}
+
+		// Don't bother if we're closing.
+		if qr.closing {
+			return nil
+		}
+
+		// Copy, manually.
+		reg := chanmap{}
+		for c, qc := range qr.reg {
+			reg[c] = qc
+		}
+		return reg
+	}()
+	if reg == nil {
 		return
 	}
 
 	// Match each record in the segment against the registered queries.
 	// Send any matches immediately.
-	for _, record := range segment {
-	inner:
-		for c, qc := range qr.reg {
-			if qc.pass(record) {
+	s := bufio.NewScanner(bytes.NewReader(segment))
+	for s.Scan() {
+		for c, qc := range reg {
+			if qc.pass(s.Bytes()) {
 				select {
-				case c <- record:
+				case c <- s.Bytes():
 					// It's a good send, Bront.
 				case <-qc.done:
 					// We're canceled! The cancelation was also detected by the
 					// cleanup goroutine spawned by Register. That goroutine is in
 					// charge of deregistering the query and closing the chan. For
 					// our part, we should just stop sending records to this chan.
-					break inner
+					delete(reg, c) // our copy
+					continue
 				}
 			}
 		}
