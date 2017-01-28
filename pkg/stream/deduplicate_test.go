@@ -24,10 +24,10 @@ func TestDeduplicate(t *testing.T) {
 	)
 
 	var (
-		rec1  = []byte(fmt.Sprintf("%s First", ulid.MustNew(ulid.Timestamp(t0), nil).String()))
-		rec2  = []byte(fmt.Sprintf("%s Second alpha", ulid.MustNew(ulid.Timestamp(t1), nil).String()))
-		rec2b = []byte(fmt.Sprintf("%s Second beta", ulid.MustNew(ulid.Timestamp(t1), nil).String()))
-		rec3  = []byte(fmt.Sprintf("%s Third", ulid.MustNew(ulid.Timestamp(t2), nil).String()))
+		rec1  = []byte(fmt.Sprintf("%s Aaaa", ulid.MustNew(ulid.Timestamp(t0), nil).String()))
+		rec2  = []byte(fmt.Sprintf("%s Bbb1", ulid.MustNew(ulid.Timestamp(t1), nil).String()))
+		rec2b = []byte(fmt.Sprintf("%s Bbb2", ulid.MustNew(ulid.Timestamp(t1), nil).String()))
+		rec3  = []byte(fmt.Sprintf("%s Cccc", ulid.MustNew(ulid.Timestamp(t2), nil).String()))
 	)
 
 	// Out-of-order and duplicate inserts.

@@ -302,9 +302,9 @@ func runIngestStore(args []string) error {
 		Help:      "Number of peers in the cluster from this node's perspective.",
 	}, func() float64 { return float64(peer.ClusterSize()) }))
 
-	// Create the HTTP client we'll use for various purposes.
-	// TODO(pb): audit to see if we need purpose-built clients
-	httpClient := &http.Client{
+	// Create the HTTP clients we'll use for various purposes.
+	unlimitedClient := http.DefaultClient // no timeouts, be careful
+	timeoutClient := &http.Client{
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			ResponseHeaderTimeout: 5 * time.Second,
@@ -373,7 +373,7 @@ func runIngestStore(args []string) error {
 	for i := 0; i < *segmentConsumers; i++ {
 		c := store.NewConsumer(
 			peer,
-			httpClient,
+			timeoutClient,
 			*segmentTargetSize,
 			*segmentTargetAge,
 			*segmentReplicationFactor,
@@ -423,7 +423,8 @@ func runIngestStore(args []string) error {
 			api := store.NewAPI(
 				peer,
 				storeLog,
-				httpClient,
+				timeoutClient,
+				unlimitedClient,
 				replicatedSegments.WithLabelValues("ingress"),
 				replicatedBytes.WithLabelValues("ingress"),
 				apiDuration,

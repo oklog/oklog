@@ -12,7 +12,7 @@ import (
 // Deduplicate and order records within the given time window.
 // A smaller window may cause duplicate or out-of-order messages.
 // A larger window will cause higher end-to-end latency.
-// The ticker is used to flush the buffer every window / 10.
+// The ticker is used every window / 10 to flush the buffer.
 // The returned chan is closed when the in chan is closed.
 func Deduplicate(in <-chan []byte, window time.Duration, ticker func(time.Duration) *time.Ticker) <-chan []byte {
 	out := make(chan []byte, 1024) // TODO(pb): validate buffer size

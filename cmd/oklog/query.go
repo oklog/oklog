@@ -79,8 +79,6 @@ func runQuery(args []string) error {
 		return fmt.Errorf("couldn't parse -to (%q) as either duration or time", *to)
 	}
 
-	verbosePrintf("-from %s -to %s\n", fromStr, toStr)
-
 	method := "GET"
 	if *stats {
 		method = "HEAD"
@@ -108,9 +106,15 @@ func runQuery(args []string) error {
 	if err != nil {
 		return err
 	}
+	if resp.StatusCode != http.StatusOK {
+		req.URL.RawQuery = "" // for pretty print
+		return errors.Errorf("%s %s: %s", req.Method, req.URL.String(), resp.Status)
+	}
 
 	var result store.QueryResult
-	result.DecodeFrom(resp)
+	if err := result.DecodeFrom(resp); err != nil {
+		return errors.Wrap(err, "decoding query result")
+	}
 
 	qtype := "normal string"
 	if result.Params.Regex {
