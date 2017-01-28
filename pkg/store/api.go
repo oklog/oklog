@@ -286,6 +286,11 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	window, err := time.ParseDuration(r.URL.Query().Get("window"))
+	if err != nil {
+		window = 3 * time.Second
+	}
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "can't stream to your client", http.StatusPreconditionFailed)
@@ -316,7 +321,8 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 		return u.String()
 	})
 
-	records := stream.Execute(
+	// The raw chan is closed when the context is canceled.
+	raw := stream.Execute(
 		r.Context(),
 		peerFactory,
 		readerFactory,
@@ -324,15 +330,18 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 		time.NewTicker,
 	)
 
-	for {
-		select {
-		case record := <-records:
-			w.Write(record)
-			w.Write([]byte{'\n'})
-			flusher.Flush()
-		case <-r.Context().Done():
-			return
-		}
+	// The deduplicated chan is closed when the raw chan is closed.
+	deduplicated := stream.Deduplicate(
+		raw,
+		window,
+		time.NewTicker,
+	)
+
+	// Thus, we range over the deduplicated chan.
+	for record := range deduplicated {
+		w.Write(record)
+		w.Write([]byte{'\n'})
+		flusher.Flush()
 	}
 }
 
@@ -354,7 +363,10 @@ func (a *API) handleInternalStream(w http.ResponseWriter, r *http.Request) {
 		pass = recordFilterRegex(regexp.MustCompile(qp.Q))
 	}
 
+	// The records chan is closed when the context is canceled.
 	records := a.streamQueries.Register(r.Context(), pass)
+
+	// Thus, we range over the records chan.
 	for record := range records {
 		w.Write(record)
 		w.Write([]byte{'\n'})

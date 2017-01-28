@@ -11,6 +11,8 @@ import (
 )
 
 func TestReadOnce(t *testing.T) {
+	t.Parallel()
+
 	n := 3
 	rf := func(ctx context.Context, addr string) (io.Reader, error) {
 		return &ctxReader{ctx, []byte(addr), int32(10 * n)}, nil
@@ -43,6 +45,8 @@ func TestReadOnce(t *testing.T) {
 }
 
 func TestReadUntilCanceled(t *testing.T) {
+	t.Parallel()
+
 	rf := func(ctx context.Context, addr string) (io.Reader, error) {
 		return &ctxReader{ctx, []byte(addr), 1}, nil
 	}
