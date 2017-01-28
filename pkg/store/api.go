@@ -38,7 +38,8 @@ const (
 type API struct {
 	peer               *cluster.Peer
 	log                Log
-	client             *http.Client
+	queryClient        *http.Client // should time out
+	streamClient       *http.Client // should not time out
 	streamQueries      *queryRegistry
 	replicatedSegments prometheus.Counter
 	replicatedBytes    prometheus.Counter
@@ -50,7 +51,7 @@ type API struct {
 func NewAPI(
 	peer *cluster.Peer,
 	log Log,
-	client *http.Client,
+	queryClient, streamClient *http.Client,
 	replicatedSegments, replicatedBytes prometheus.Counter,
 	duration *prometheus.HistogramVec,
 	logger log.Logger,
@@ -58,7 +59,8 @@ func NewAPI(
 	return &API{
 		peer:               peer,
 		log:                log,
-		client:             client,
+		queryClient:        queryClient,
+		streamClient:       streamClient,
 		streamQueries:      newQueryRegistry(),
 		replicatedSegments: replicatedSegments,
 		replicatedBytes:    replicatedBytes,
@@ -175,7 +177,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 	c := make(chan response, len(requests))
 	for _, req := range requests {
 		go func(req *http.Request) {
-			resp, err := a.client.Do(req)
+			resp, err := a.queryClient.Do(req)
 			c <- response{resp, err}
 		}(req)
 	}
@@ -290,6 +292,9 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		window = 3 * time.Second
 	}
+	if window < 100*time.Millisecond {
+		window = 100 * time.Millisecond
+	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -301,10 +306,8 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 		return a.peer.Current(cluster.PeerTypeStore)
 	}
 
-	// We need a special client which doesn't time out.
-	oneshot := http.DefaultClient // TODO(pb): further research
-
-	readerFactory := stream.HTTPReaderFactory(oneshot, func(addr string) string {
+	// Use the special stream client, which doesn't time out.
+	readerFactory := stream.HTTPReaderFactory(a.streamClient, func(addr string) string {
 		// Copy original URL, to save all the query params, etc.
 		u, err := url.Parse(r.URL.String())
 		if err != nil {

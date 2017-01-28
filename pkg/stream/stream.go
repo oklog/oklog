@@ -11,7 +11,7 @@ import (
 )
 
 // PeerFactory should return the current set of peer addresses.
-// Each address will be converted to an io.Reader via the ReaderFactory.
+// Each address will be converted to an io.Reader via the ReadCloserFactory.
 // The PeerFactory is periodically invoked to get the latest set of peers.
 type PeerFactory func() []string
 
