@@ -16,6 +16,8 @@ import (
 )
 
 func TestQueryRegistry(t *testing.T) {
+	t.Parallel()
+
 	// Set up an empty query registry.
 	qr := newQueryRegistry()
 	defer qr.Close()
@@ -86,6 +88,8 @@ func TestQueryRegistry(t *testing.T) {
 }
 
 func TestQueryRegistryClose(t *testing.T) {
+	t.Parallel()
+
 	qr := newQueryRegistry()
 	c := qr.Register(context.Background(), recordFilterPlain([]byte("")))
 	qr.Close()
