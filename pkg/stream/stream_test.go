@@ -14,7 +14,7 @@ func TestReadOnce(t *testing.T) {
 	t.Parallel()
 
 	n := 3
-	rf := func(ctx context.Context, addr string) (io.Reader, error) {
+	rcf := func(ctx context.Context, addr string) (io.ReadCloser, error) {
 		return &ctxReader{ctx, []byte(addr), int32(10 * n)}, nil
 	}
 
@@ -39,7 +39,7 @@ func TestReadOnce(t *testing.T) {
 	}()
 
 	// Make sure the context cancelation terminates the function.
-	if want, have := context.Canceled, readOnce(ctx, rf, addr, sink); want != have {
+	if want, have := context.Canceled, readOnce(ctx, rcf, addr, sink); want != have {
 		t.Errorf("want %v, have %v", want, have)
 	}
 }
@@ -47,7 +47,7 @@ func TestReadOnce(t *testing.T) {
 func TestReadUntilCanceled(t *testing.T) {
 	t.Parallel()
 
-	rf := func(ctx context.Context, addr string) (io.Reader, error) {
+	rcf := func(ctx context.Context, addr string) (io.ReadCloser, error) {
 		return &ctxReader{ctx, []byte(addr), 1}, nil
 	}
 
@@ -77,7 +77,7 @@ func TestReadUntilCanceled(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		noSleep := func(time.Duration) { /* no delay pls */ }
-		readUntilCanceled(ctx, rf, "some.addr.local", sink, noSleep)
+		readUntilCanceled(ctx, rcf, "some.addr.local", sink, noSleep)
 		close(done)
 	}()
 	select {
@@ -104,3 +104,5 @@ func (r *ctxReader) Read(p []byte) (int, error) {
 		return copy(p, append(r.rec, '\n')), nil
 	}
 }
+
+func (*ctxReader) Close() error { return nil }

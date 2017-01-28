@@ -15,10 +15,10 @@ import (
 // The PeerFactory is periodically invoked to get the latest set of peers.
 type PeerFactory func() []string
 
-// ReaderFactory converts a peer address to an io.Reader.
-// Readers must exit with context.Canceled when the context is canceled.
-// Other errors will cause the managing goroutine to reconstruct the reader.
-type ReaderFactory func(context.Context, string) (io.Reader, error)
+// ReadCloserFactory converts a peer address to an io.ReadCloser.
+// ReadClosers must exit with context.Canceled when the context is canceled.
+// Other errors will cause the managing goroutine to remanufacture.
+type ReadCloserFactory func(context.Context, string) (io.ReadCloser, error)
 
 // Execute creates and maintains streams of records to multiple peers.
 // It muxes the streams to the returned chan of records.
@@ -31,7 +31,7 @@ type ReaderFactory func(context.Context, string) (io.Reader, error)
 func Execute(
 	ctx context.Context,
 	pf PeerFactory,
-	rf ReaderFactory,
+	rcf ReadCloserFactory,
 	sleep func(time.Duration),
 	ticker func(time.Duration) *time.Ticker,
 ) <-chan []byte {
@@ -41,7 +41,7 @@ func Execute(
 
 	// Invoke the PeerFactory to get the initial addrs.
 	// Initialize connection managers to each of them.
-	active := updateActive(ctx, nil, pf(), rf, c, sleep)
+	active := updateActive(ctx, nil, pf(), rcf, c, sleep)
 
 	go func() {
 		// Re-invoke the peerFactory every second.
@@ -54,7 +54,7 @@ func Execute(
 			case <-tk.C:
 				// Detect new peers, and create connection managers for them.
 				// Terminate connection managers for peers that have gone away.
-				active = updateActive(ctx, active, pf(), rf, c, sleep) // update
+				active = updateActive(ctx, active, pf(), rcf, c, sleep)
 
 			case <-ctx.Done():
 				// Context cancelation is transitive.
@@ -72,7 +72,7 @@ func updateActive(
 	parent context.Context,
 	prevgen map[string]func(),
 	addrs []string,
-	rf ReaderFactory,
+	rcf ReadCloserFactory,
 	sink chan<- []byte,
 	sleep func(time.Duration),
 ) map[string]func() {
@@ -91,7 +91,7 @@ func updateActive(
 			// This addr appears to be new!
 			// Create a new connection manager for it.
 			ctx, cancel := context.WithCancel(parent)
-			go readUntilCanceled(ctx, rf, addr, sink, sleep)
+			go readUntilCanceled(ctx, rcf, addr, sink, sleep)
 			nextgen[addr] = cancel
 		}
 	}
@@ -110,23 +110,24 @@ func updateActive(
 // We connect to addr via the factory, read records, and put them on the sink.
 // Any connection error causes us to wait a second and then reconnect.
 // readUntilCanceled blocks until the context is canceled.
-func readUntilCanceled(ctx context.Context, rf ReaderFactory, addr string, sink chan<- []byte, sleep func(time.Duration)) {
+func readUntilCanceled(ctx context.Context, rcf ReadCloserFactory, addr string, sink chan<- []byte, sleep func(time.Duration)) {
 	for {
-		switch readOnce(ctx, rf, addr, sink) {
+		switch readOnce(ctx, rcf, addr, sink) {
 		case context.Canceled:
-			return
+			return // fatal
 		default:
-			sleep(time.Second)
+			sleep(time.Second) // TODO(pb): better strategy?
 		}
 	}
 }
 
-func readOnce(ctx context.Context, rf ReaderFactory, addr string, sink chan<- []byte) error {
-	r, err := rf(ctx, addr)
+func readOnce(ctx context.Context, rcf ReadCloserFactory, addr string, sink chan<- []byte) error {
+	rc, err := rcf(ctx, addr)
 	if err != nil {
 		return err
 	}
-	s := bufio.NewScanner(r)
+	defer rc.Close()
+	s := bufio.NewScanner(rc)
 	for s.Scan() {
 		select {
 		case sink <- s.Bytes():
@@ -139,9 +140,9 @@ func readOnce(ctx context.Context, rf ReaderFactory, addr string, sink chan<- []
 
 // HTTPReaderFactory returns a ReaderFactory that converts the addr to a URL via
 // the addr2url function, makes a GET request via the client, and returns the
-// response body as the reader.
-func HTTPReaderFactory(client *http.Client, addr2url func(string) string) ReaderFactory {
-	return func(ctx context.Context, addr string) (io.Reader, error) {
+// response body as the ReadCloser.
+func HTTPReaderFactory(client *http.Client, addr2url func(string) string) ReadCloserFactory {
+	return func(ctx context.Context, addr string) (io.ReadCloser, error) {
 		req, err := http.NewRequest("GET", addr2url(addr), nil)
 		if err != nil {
 			return nil, errors.Wrap(err, "NewRequest")
