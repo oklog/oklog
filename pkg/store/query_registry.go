@@ -131,14 +131,15 @@ func (qr *queryRegistry) Match(segment []byte) {
 		for c, qc := range qr.reg {
 			if qc.pass(s.Bytes()) {
 				select {
-				case c <- s.Bytes():
-					// It's a good send, Bront.
+				case c <- []byte(s.Text()):
+					// We use s.Text to copy the record out of the Scanner.
 
 				case <-qc.done:
 					// We're canceled! The cancelation was also detected by the
-					// cleanup goroutine spawned by Register. That goroutine is in
-					// charge of deregistering the query and closing the chan. For
-					// our part, we should just stop sending records to this chan.
+					// cleanup goroutine spawned by Register. That goroutine is
+					// in charge of deregistering the query and closing the
+					// chan. For our part, we should just stop sending records
+					// to this chan.
 					continue
 				}
 			}

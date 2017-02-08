@@ -340,8 +340,26 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 		time.NewTicker,
 	)
 
+	//c := make(chan int)
+	//go func() {
+	//	var (
+	//		slice = make([]bool, 10000)
+	//		next  = 1
+	//	)
+	//	for i := range c {
+	//		slice[i] = true
+	//		fmt.Fprintf(os.Stderr, "### check·Write %d (next=%d)\n", i, next)
+	//		for slice[next] == true {
+	//			fmt.Fprintf(os.Stderr, "### check·Verify %d OK\n", next)
+	//			next++
+	//		}
+	//	}
+	//}()
+
 	// Thus, we range over the deduplicated chan.
 	for record := range deduplicated {
+		//i, _ := strconv.Atoi(strings.Fields(string(record))[3])
+		//c <- i
 		w.Write(record)
 		w.Write([]byte{'\n'})
 		flusher.Flush()
@@ -424,7 +442,9 @@ func teeRecords(src io.Reader, dst ...io.Writer) (lo, hi ulid.ULID, n int, err e
 	)
 	for s.Scan() {
 		// ULID and record-count accounting.
-		id.UnmarshalText(s.Bytes()[:ulid.EncodedSize])
+		if err := id.UnmarshalText(s.Bytes()[:ulid.EncodedSize]); err != nil {
+			return lo, hi, n, err
+		}
 		if first {
 			lo, first = id, false
 		}
