@@ -307,7 +307,7 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Use the special stream client, which doesn't time out.
-	readerFactory := stream.HTTPReaderFactory(a.streamClient, func(addr string) string {
+	readCloserFactory := stream.HTTPReadCloserFactory(a.streamClient, func(addr string) string {
 		// Copy original URL, to save all the query params, etc.
 		u, err := url.Parse(r.URL.String())
 		if err != nil {
@@ -328,7 +328,7 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 	raw := stream.Execute(
 		r.Context(),
 		peerFactory,
-		readerFactory,
+		readCloserFactory,
 		time.Sleep,
 		time.NewTicker,
 	)
