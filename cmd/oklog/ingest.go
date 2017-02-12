@@ -50,7 +50,7 @@ func runIngest(args []string) error {
 		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", defaultIngestSegmentFlushAge, "flush segments after they are active for this long")
 		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", defaultIngestSegmentPendingTimeout, "claimed but uncommitted pending segments are failed after this long")
 		filesystem            = flagset.String("filesystem", defaultFilesystem, "real, real-mmap, virtual, nop")
-		clusterPeers          = stringset{}
+		clusterPeers          = stringslice{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
 	flagset.Usage = usageFor(flagset, "oklog ingest [flags]")
@@ -231,7 +231,7 @@ func runIngest(args []string) error {
 	// Create peer.
 	peer, err := cluster.NewPeer(
 		clusterHost, clusterPort,
-		clusterPeers.slice(),
+		clusterPeers,
 		cluster.PeerTypeIngest, apiPort,
 		log.NewContext(logger).With("component", "cluster"),
 	)

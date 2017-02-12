@@ -21,8 +21,10 @@ import (
 func runForward(args []string) error {
 	flagset := flag.NewFlagSet("forward", flag.ExitOnError)
 	var (
-		apiAddr = flagset.String("api", "", "listen address for forward API (and metrics)")
+		apiAddr  = flagset.String("api", "", "listen address for forward API (and metrics)")
+		prefixes = stringslice{}
 	)
+	flagset.Var(&prefixes, "prefix", "prefix annotated on each log record (repeatable)")
 	flagset.Usage = usageFor(flagset, "oklog forward [flags] <ingester> [<ingester>...]")
 	if err := flagset.Parse(args); err != nil {
 		return err
@@ -99,6 +101,12 @@ func runForward(args []string) error {
 			return errors.Wrapf(err, "couldn't split host:port")
 		}
 		urls = append(urls, u)
+	}
+
+	// Construct the prefix expression.
+	var prefix string
+	if len(prefixes) > 0 {
+		prefix = strings.Join(prefixes, " ") + " "
 	}
 
 	// Shuffle the order.
@@ -183,7 +191,7 @@ func runForward(args []string) error {
 		for ok {
 			// We enter the loop wanting to write s.Text() to the conn.
 			record := s.Text()
-			if n, err := fmt.Fprintf(conn, "%s\n", record); err != nil {
+			if n, err := fmt.Fprintf(conn, "%s%s\n", prefix, record); err != nil {
 				disconnects.Inc()
 				level.Warn(logger).Log("disconnected_from", target.String(), "due_to", err)
 				break
