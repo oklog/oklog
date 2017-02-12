@@ -30,6 +30,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  store        Storage node\n")
 	fmt.Fprintf(os.Stderr, "  ingeststore  Combination ingest+store node, for small installations\n")
 	fmt.Fprintf(os.Stderr, "  query        Querying commandline tool\n")
+	fmt.Fprintf(os.Stderr, "  stream       Streaming commandline tool\n")
 	fmt.Fprintf(os.Stderr, "  testsvc      Test service, emits log lines at a fixed rate\n")
 	fmt.Fprintf(os.Stderr, "\n")
 	fmt.Fprintf(os.Stderr, "VERSION\n")
@@ -55,6 +56,8 @@ func main() {
 		run = runIngestStore
 	case "query":
 		run = runQuery
+	case "stream":
+		run = runStream
 	case "testsvc":
 		run = runTestService
 	default:
