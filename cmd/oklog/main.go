@@ -81,16 +81,16 @@ var (
 
 type stringslice []string
 
-func (ss stringslice) Set(s string) error {
-	ss = append(ss, s)
+func (ss *stringslice) Set(s string) error {
+	(*ss) = append(*ss, s)
 	return nil
 }
 
-func (ss stringslice) String() string {
-	if len(ss) <= 0 {
+func (ss *stringslice) String() string {
+	if len(*ss) <= 0 {
 		return "..."
 	}
-	return strings.Join(ss, ", ")
+	return strings.Join(*ss, ", ")
 }
 
 func interrupt(cancel <-chan struct{}) error {

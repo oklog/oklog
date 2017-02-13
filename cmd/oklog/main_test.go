@@ -1,6 +1,19 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestStringSlice(t *testing.T) {
+	var ss stringslice
+	ss.Set("a")
+	ss.Set("a")
+	ss.Set("b")
+	if want, have := "a a b", strings.Join(ss, " "); want != have {
+		t.Errorf("want %q, have %q", want, have)
+	}
+}
 
 func TestParseAddr(t *testing.T) {
 	for _, testcase := range []struct {
