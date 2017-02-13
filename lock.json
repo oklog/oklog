@@ -1,5 +1,5 @@
 {
-    "memo": "3369fc05fb53f33a7030ef62ba488ade29bde856456f7c2570d233b76710062b",
+    "memo": "cc2a3853a2b6a18f68c72d93707604397d49dc6e9e0fc547f5e8ad9111b4c4da",
     "projects": [
         {
             "name": "github.com/armon/go-metrics",
@@ -19,15 +19,16 @@
         },
         {
             "name": "github.com/djherbis/buffer",
-            "version": "v1.0",
-            "revision": "4972e2bf4a27dbd7c43140c959b85e8c1d2f5536",
+            "version": "v1.0.0",
+            "revision": "c8b7051e392cf78efc6f82f20ff71e89f20e0ea3",
             "packages": [
                 "."
             ]
         },
         {
             "name": "github.com/djherbis/nio",
-            "revision": "ef1ef18680a47535b20e3ffcfed28d1bd013ab67",
+            "version": "v2.0.3",
+            "revision": "824ca9017eeb2a422fdda7ae9dba05d3ab019dfa",
             "packages": [
                 "."
             ]
@@ -35,7 +36,7 @@
         {
             "name": "github.com/go-kit/kit",
             "branch": "master",
-            "revision": "da918843ac352b1199ee9d69f2e8f748a22fcf42",
+            "revision": "a59216a7ce3200b6ba0c05ee8b6da44b852833ce",
             "packages": [
                 "log",
                 "log/experimental_level"
@@ -115,8 +116,8 @@
         },
         {
             "name": "github.com/miekg/dns",
-            "branch": "5966",
-            "revision": "27263c64b13655b9e63c6563e167d215f0830a65",
+            "branch": "master",
+            "revision": "ca336a1f95a6b89be9c250df26c7a41742eb4a6f",
             "packages": [
                 "."
             ]
@@ -140,7 +141,7 @@
         {
             "name": "github.com/pkg/errors",
             "version": "v0.8.0",
-            "revision": "3866ebc348c54054262feae422da428fe6cf147d",
+            "revision": "645ef00459ed84a119197bfb8d8205042c6df63d",
             "packages": [
                 "."
             ]
