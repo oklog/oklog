@@ -1,10 +1,10 @@
 {
     "dependencies": {
         "github.com/djherbis/buffer": {
-            "version": "v1.0.0"
+            "version": "^1.0.0"
         },
         "github.com/djherbis/nio": {
-            "revision": "ef1ef18680a47535b20e3ffcfed28d1bd013ab67"
+            "version": "^2.0.3"
         },
         "github.com/go-kit/kit": {
             "branch": "master"
@@ -13,19 +13,19 @@
             "branch": "master"
         },
         "github.com/oklog/ulid": {
-            "version": "v0.3.0"
+            "version": ">=0.3.0, <1.0.0"
         },
         "github.com/pborman/uuid": {
-            "version": "v1.0"
+            "version": "^1.0.0"
         },
         "github.com/pkg/errors": {
-            "version": "v0.8.0"
+            "version": ">=0.8.0, <1.0.0"
         },
         "github.com/prometheus/client_golang": {
-            "version": "v0.8.0"
+            "version": ">=0.8.0, <1.0.0"
         },
         "github.com/prometheus/prometheus": {
-            "version": "v1.4.1"
+            "version": "^1.4.1"
         }
     }
 }
