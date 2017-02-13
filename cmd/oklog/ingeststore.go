@@ -42,7 +42,7 @@ func runIngestStore(args []string) error {
 		segmentRetain            = flagset.Duration("store.segment-retain", defaultStoreSegmentRetain, "retention period for segment files")
 		segmentPurge             = flagset.Duration("store.segment-purge", defaultStoreSegmentPurge, "purge deleted segment files after this long")
 		filesystem               = flagset.String("filesystem", defaultFilesystem, "real, real-mmap, virtual, nop")
-		clusterPeers             = stringset{}
+		clusterPeers             = stringslice{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
 	flagset.Usage = usageFor(flagset, "oklog ingeststore [flags]")
@@ -289,7 +289,7 @@ func runIngestStore(args []string) error {
 	// Create peer.
 	peer, err := cluster.NewPeer(
 		clusterHost, clusterPort,
-		clusterPeers.slice(),
+		clusterPeers,
 		cluster.PeerTypeIngestStore, apiPort,
 		log.NewContext(logger).With("component", "cluster"),
 	)

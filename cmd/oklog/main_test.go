@@ -1,6 +1,19 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestStringSlice(t *testing.T) {
+	var ss stringslice
+	ss.Set("a")
+	ss.Set("a")
+	ss.Set("b")
+	if want, have := "a a b", strings.Join(ss, " "); want != have {
+		t.Errorf("want %q, have %q", want, have)
+	}
+}
 
 func TestParseAddr(t *testing.T) {
 	for _, testcase := range []struct {
@@ -40,81 +53,81 @@ func TestParseAddr(t *testing.T) {
 }
 
 func TestHasNonlocal(t *testing.T) {
-	makeset := func(a ...string) stringset {
-		ss := stringset{}
+	makeslice := func(a ...string) stringslice {
+		ss := stringslice{}
 		for _, s := range a {
-			ss[s] = struct{}{}
+			ss.Set(s)
 		}
 		return ss
 	}
 	for _, testcase := range []struct {
 		name  string
-		input stringset
+		input stringslice
 		want  bool
 	}{
 		{
 			"empty",
-			makeset(),
+			makeslice(),
 			false,
 		},
 		{
 			"127",
-			makeset("127.0.0.9"),
+			makeslice("127.0.0.9"),
 			false,
 		},
 		{
 			"127 with port",
-			makeset("127.0.0.1:1234"),
+			makeslice("127.0.0.1:1234"),
 			false,
 		},
 		{
 			"nonlocal IP",
-			makeset("1.2.3.4"),
+			makeslice("1.2.3.4"),
 			true,
 		},
 		{
 			"nonlocal IP with port",
-			makeset("1.2.3.4:5678"),
+			makeslice("1.2.3.4:5678"),
 			true,
 		},
 		{
 			"nonlocal host",
-			makeset("foo.corp"),
+			makeslice("foo.corp"),
 			true,
 		},
 		{
 			"nonlocal host with port",
-			makeset("foo.corp:7659"),
+			makeslice("foo.corp:7659"),
 			true,
 		},
 		{
 			"localhost",
-			makeset("localhost"),
+			makeslice("localhost"),
 			false,
 		},
 		{
 			"localhost with port",
-			makeset("localhost:1234"),
+			makeslice("localhost:1234"),
 			false,
 		},
 		{
 			"multiple IP",
-			makeset("127.0.0.1", "1.2.3.4"),
+			makeslice("127.0.0.1", "1.2.3.4"),
 			true,
 		},
 		{
 			"multiple hostname",
-			makeset("localhost", "otherhost"),
+			makeslice("localhost", "otherhost"),
 			true,
 		},
 		{
 			"multiple local",
-			makeset("localhost", "127.0.0.1", "127.128.129.130:4321", "localhost:10001", "localhost:10002"),
+			makeslice("localhost", "127.0.0.1", "127.128.129.130:4321", "localhost:10001", "localhost:10002"),
 			false,
 		},
 		{
 			"multiple mixed",
-			makeset("localhost", "127.0.0.1", "129.128.129.130:4321", "localhost:10001", "localhost:10002"),
+			makeslice("localhost", "127.0.0.1", "129.128.129.130:4321", "localhost:10001", "localhost:10002"),
 			true,
 		},
 	} {
