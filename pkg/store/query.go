@@ -323,13 +323,12 @@ func makeConcurrentFilteringReadClosers(fs fs.Filesystem, segments []string, pas
 		}
 	}()
 
-	rcs = make([]io.ReadCloser, len(segments))
-	for i := range segments {
-		f, err := fs.Open(segments[i])
+	for _, segment := range segments {
+		f, err := fs.Open(segment)
 		if err != nil {
 			return rcs, sz, err
 		}
-		rcs[i] = newConcurrentFilteringReadCloser(f, pass, bufsz)
+		rcs = append(rcs, newConcurrentFilteringReadCloser(f, pass, bufsz))
 		sz += f.Size()
 	}
 
