@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oklog/oklog/pkg/fs"
 	"github.com/oklog/ulid"
 )
 
@@ -305,5 +306,26 @@ func TestIssue23(t *testing.T) {
 	}
 	if want, have := input, string(output); want != have {
 		t.Errorf("want %d bytes, have %d bytes", len(want), len(have))
+	}
+}
+
+func TestIssue41(t *testing.T) {
+	var (
+		filesys  = fs.NewVirtualFilesystem()
+		filename = "extant"
+		segments = []string{filename, "nonexistant"}
+		pass     = func([]byte) bool { return true }
+		bufsz    = int64(1024)
+	)
+
+	f, err := filesys.Create(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	// Should error but not panic.
+	if _, _, err = makeConcurrentFilteringReadClosers(filesys, segments, pass, bufsz); err == nil {
+		t.Errorf("expected error, got none")
 	}
 }
