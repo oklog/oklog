@@ -25,7 +25,11 @@ func (fs *virtualFilesystem) Create(path string) (File, error) {
 	fs.mtx.Lock()
 	defer fs.mtx.Unlock()
 	// os.Create truncates any existing file. So we do, too.
-	f := &virtualFile{path, bytes.Buffer{}, time.Now(), time.Now()}
+	f := &virtualFile{
+		name:  path,
+		atime: time.Now(),
+		mtime: time.Now(),
+	}
 	fs.files[path] = f
 	return f, nil
 }
@@ -110,24 +114,45 @@ func (fs *virtualFilesystem) Lock(path string) (r Releaser, existed bool, err er
 	}
 
 	// Copy/paste.
-	fs.files[path] = &virtualFile{path, bytes.Buffer{}, time.Now(), time.Now()}
+	fs.files[path] = &virtualFile{
+		name:  path,
+		atime: time.Now(),
+		mtime: time.Now(),
+	}
 
 	return virtualReleaser(func() error { return fs.Remove(path) }), false, nil
 }
 
 type virtualFile struct {
 	name  string
+	mtx   sync.Mutex
 	buf   bytes.Buffer
 	atime time.Time
 	mtime time.Time
 }
 
-func (f *virtualFile) Read(p []byte) (int, error)  { return f.buf.Read(p) }
-func (f *virtualFile) Write(p []byte) (int, error) { return f.buf.Write(p) }
-func (f *virtualFile) Close() error                { return nil }
-func (f *virtualFile) Name() string                { return f.name }
-func (f *virtualFile) Size() int64                 { return int64(f.buf.Len()) }
-func (f *virtualFile) Sync() error                 { return nil }
+func (f *virtualFile) Read(p []byte) (int, error) {
+	f.mtx.Lock()
+	defer f.mtx.Unlock()
+	return f.buf.Read(p)
+}
+
+func (f *virtualFile) Write(p []byte) (int, error) {
+	f.mtx.Lock()
+	defer f.mtx.Unlock()
+	return f.buf.Write(p)
+}
+
+func (f *virtualFile) Close() error { return nil }
+func (f *virtualFile) Name() string { return f.name }
+
+func (f *virtualFile) Size() int64 {
+	f.mtx.Lock()
+	defer f.mtx.Unlock()
+	return int64(f.buf.Len())
+}
+
+func (f *virtualFile) Sync() error { return nil }
 
 type virtualFileInfo struct {
 	name  string
