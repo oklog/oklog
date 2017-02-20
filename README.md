@@ -91,8 +91,8 @@ Pipe the stdout/stderr of your service to the forwarder, configured to talk to y
 $ ./myservice | oklog forward ingest1 ingest2
 ```
 
-Seamless integration with popular cluster managers, like Kubernetes, is high on the priority list.
-Watch this space for drop-in solutions.
+OK Log integrates in a straightforward way with runtimes like Docker and Kubernetes.
+See [the Integrations page](https://github.com/oklog/oklog/wiki/Integrations) for more details.
 
 ## Querying
 
