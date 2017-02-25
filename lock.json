@@ -1,5 +1,5 @@
 {
-    "memo": "cc2a3853a2b6a18f68c72d93707604397d49dc6e9e0fc547f5e8ad9111b4c4da",
+    "memo": "61456a32254136322debe76df3d044dcd2d4126eb072fc4b0ae9fbb3d987f63b",
     "projects": [
         {
             "name": "github.com/armon/go-metrics",
@@ -64,6 +64,14 @@
             "revision": "8ee79997227bf9b34611aee7946ae64735e6fd93",
             "packages": [
                 "proto"
+            ]
+        },
+        {
+            "name": "github.com/google/btree",
+            "branch": "master",
+            "revision": "316fb6d3f031ae8f4d457c6c5186b9e3ded70435",
+            "packages": [
+                "."
             ]
         },
         {
@@ -136,6 +144,14 @@
             "revision": "a97ce2ca70fa5a848076093f05e639a89ca34d06",
             "packages": [
                 "."
+            ]
+        },
+        {
+            "name": "github.com/petar/GoLLRB",
+            "branch": "master",
+            "revision": "53be0d36a84c2a886ca057d34b6aa4468df9ccb4",
+            "packages": [
+                "llrb"
             ]
         },
         {

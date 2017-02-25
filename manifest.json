@@ -9,6 +9,9 @@
         "github.com/go-kit/kit": {
             "branch": "master"
         },
+        "github.com/google/btree": {
+            "branch": "master"
+        },
         "github.com/hashicorp/memberlist": {
             "branch": "master"
         },
