@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,7 +35,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  testsvc      Test service, emits log lines at a fixed rate\n")
 	fmt.Fprintf(os.Stderr, "\n")
 	fmt.Fprintf(os.Stderr, "VERSION\n")
-	fmt.Fprintf(os.Stderr, "  %s\n", version)
+	fmt.Fprintf(os.Stderr, "  %s (%s)\n", version, runtime.Version())
 	fmt.Fprintf(os.Stderr, "\n")
 }
 
