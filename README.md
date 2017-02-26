@@ -121,7 +121,7 @@ $ oklog query -from 1h -q /api/v1/login
 
 $ oklog query -from 1h -q /api/v1/login | cut -d' ' -f3- | jq '. | select(.status_code == 500)'
 {
-    "remote_addr": "10.9.55.2:55210",
+	"remote_addr": "10.9.55.2:55210",
 	"path": "/api/v1/login",
 	"method": "POST",
 	"status_code": 500
