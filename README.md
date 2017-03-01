@@ -141,3 +141,4 @@ $ oklog query -from 1h -q /api/v1/login | cut -d' ' -f3- | jq '. | select(.statu
 [OK icon](https://thenounproject.com/term/like/594444/) by
  [Karthik Srinivas](https://thenounproject.com/aathis/) from the
  [Noun Project](https://thenounproject.com).
+Development supported by [DigitalOcean](https://digitalocean.com).
