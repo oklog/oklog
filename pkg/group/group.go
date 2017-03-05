@@ -1,8 +1,8 @@
 // Package group implements an actor-runner with deterministic teardown. It is
-// very similar to package errgroup, except it does not require actor goroutines
-// to understand context semantics. This makes it suitable for use in more
-// circumstances; for example, goroutines which are handling connections from
-// net.Listeners, or scanning input from a closable io.Reader.
+// somewhat similar to package errgroup, except it does not require actor
+// goroutines to understand context semantics. This makes it suitable for use
+// in more circumstances; for example, goroutines which are handling
+// connections from net.Listeners, or scanning input from a closable io.Reader.
 package group
 
 // Group collects actors (functions) and runs them concurrently.
