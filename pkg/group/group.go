@@ -36,12 +36,7 @@ type Group struct {
 //
 //    ctx, cancel := context.WithCancel(context.Background())
 //    g.Add(func() error {
-//        select {
-//        case <-time.After(5 * time.Second):
-//            return errors.New("time elapsed")
-//        case <-ctx.Done():
-//            return ctx.Error()
-//        }
+//        return runUntilCanceled(ctx, foo, bar)
 //    }, func(error) {
 //        cancel()
 //    })
