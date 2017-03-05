@@ -26,6 +26,22 @@ type Group struct {
 //        close(cancel)
 //    })
 //
+// This is a lower-level version of the semantics provided by contexts. So, if
+// your actor goroutine respects contexts, then you can easily accomplish the
+// same thing that way.
+//
+//    ctx, cancel := context.WithCancel(context.Background())
+//    g.Add(func() error {
+//        select {
+//        case <-time.After(5 * time.Second):
+//            return errors.New("time elapsed")
+//        case <-ctx.Done():
+//            return ctx.Error()
+//        }
+//    }, func(error) {
+//        cancel()
+//    })
+//
 // To add an e.g. HTTP server, you'll need to provide an explicit listener, so
 // that it may be interrupted.
 //
