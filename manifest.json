@@ -7,7 +7,7 @@
             "version": "^2.0.3"
         },
         "github.com/go-kit/kit": {
-            "branch": "master"
+            "version": ">=0.4.0, <1.0.0"
         },
         "github.com/google/btree": {
             "branch": "master"

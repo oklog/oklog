@@ -1,5 +1,5 @@
 {
-    "memo": "61456a32254136322debe76df3d044dcd2d4126eb072fc4b0ae9fbb3d987f63b",
+    "memo": "061346e8fb1c5b725190d4a8314ecc0df9e80a9d05e93861590ccb087dd4273e",
     "projects": [
         {
             "name": "github.com/armon/go-metrics",
@@ -22,7 +22,9 @@
             "version": "v1.0.0",
             "revision": "c8b7051e392cf78efc6f82f20ff71e89f20e0ea3",
             "packages": [
-                "."
+                ".",
+                "limio",
+                "wrapio"
             ]
         },
         {
@@ -35,11 +37,11 @@
         },
         {
             "name": "github.com/go-kit/kit",
-            "branch": "master",
-            "revision": "a59216a7ce3200b6ba0c05ee8b6da44b852833ce",
+            "version": "v0.4.0",
+            "revision": "fadad6fffe0466b19df9efd9acde5c9a52df5fa4",
             "packages": [
                 "log",
-                "log/experimental_level"
+                "log/level"
             ]
         },
         {
@@ -185,6 +187,7 @@
             "revision": "dd2f054febf4a6c00f2343686efb775948a8bff4",
             "packages": [
                 "expfmt",
+                "internal/bitbucket.org/ww/goautoneg",
                 "model"
             ]
         },
