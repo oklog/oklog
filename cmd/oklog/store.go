@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/go-kit/kit/log"
-	level "github.com/go-kit/kit/log/experimental_level"
+	"github.com/go-kit/kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -75,8 +75,8 @@ func runStore(args []string) error {
 	// Logging.
 	var logger log.Logger
 	logger = log.NewLogfmtLogger(os.Stderr)
-	logger = log.NewContext(logger).With("ts", log.DefaultTimestampUTC)
-	logger = level.New(logger, level.Allowed(level.AllowAll()))
+	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
+	logger = level.NewFilter(logger, level.AllowAll())
 
 	// Instrumentation.
 	apiDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
@@ -187,7 +187,7 @@ func runStore(args []string) error {
 		clusterHost, clusterPort,
 		clusterPeers,
 		cluster.PeerTypeStore, apiPort,
-		log.NewContext(logger).With("component", "cluster"),
+		log.With(logger, "component", "cluster"),
 	)
 	if err != nil {
 		return err
@@ -236,7 +236,7 @@ func runStore(args []string) error {
 			consumedBytes,
 			replicatedSegments.WithLabelValues("egress"),
 			replicatedBytes.WithLabelValues("egress"),
-			log.NewContext(logger).With("component", "Consumer"),
+			log.With(logger, "component", "Consumer"),
 		)
 		g.Add(func() error {
 			c.Run()
@@ -254,7 +254,7 @@ func runStore(args []string) error {
 			compactDuration,
 			trashedSegments,
 			purgedSegments,
-			log.NewContext(logger).With("component", "Compacter"),
+			log.With(logger, "component", "Compacter"),
 		)
 		g.Add(func() error {
 			c.Run()

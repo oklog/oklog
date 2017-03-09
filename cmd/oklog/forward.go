@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/go-kit/kit/log"
-	level "github.com/go-kit/kit/log/experimental_level"
+	"github.com/go-kit/kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -37,8 +37,8 @@ func runForward(args []string) error {
 	// Logging.
 	var logger log.Logger
 	logger = log.NewLogfmtLogger(os.Stderr)
-	logger = log.NewContext(logger).With("ts", log.DefaultTimestampUTC)
-	logger = level.New(logger, level.Allowed(level.AllowAll()))
+	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
+	logger = level.NewFilter(logger, level.AllowAll())
 
 	// Instrumentation.
 	forwardBytes := prometheus.NewCounter(prometheus.CounterOpts{

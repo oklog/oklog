@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/go-kit/kit/log"
-	level "github.com/go-kit/kit/log/experimental_level"
+	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/oklog/oklog/pkg/cluster"
@@ -102,7 +102,7 @@ type stateFn func() stateFn
 
 func (c *Consumer) gather() stateFn {
 	var (
-		base = log.NewContext(c.logger).With("state", "gather")
+		base = log.With(c.logger, "state", "gather")
 		warn = level.Warn(base)
 	)
 
@@ -209,7 +209,7 @@ func (c *Consumer) gather() stateFn {
 
 func (c *Consumer) replicate() stateFn {
 	var (
-		base = log.NewContext(c.logger).With("state", "replicate")
+		base = log.With(c.logger, "state", "replicate")
 		warn = level.Warn(base)
 	)
 
@@ -264,7 +264,7 @@ func (c *Consumer) fail() stateFn {
 
 func (c *Consumer) resetVia(commitOrFailed string) stateFn {
 	var (
-		base = log.NewContext(c.logger).With("state", commitOrFailed)
+		base = log.With(c.logger, "state", commitOrFailed)
 		warn = level.Warn(base)
 	)
 
