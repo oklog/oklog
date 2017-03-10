@@ -3,7 +3,6 @@ package store
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -23,32 +22,22 @@ import (
 )
 
 // QueryParams defines all dimensions of a query.
+// StatsOnly is implicit by the HTTP method.
 type QueryParams struct {
-	From  time.Time `json:"from"`
-	To    time.Time `json:"to"`
-	Q     string    `json:"q"`
-	Regex bool      `json:"regex"`
+	From  ulidOrTime `json:"from"`
+	To    ulidOrTime `json:"to"`
+	Q     string     `json:"q"`
+	Regex bool       `json:"regex"`
 }
-
-type rangeBehavior int
-
-const (
-	rangeRequired rangeBehavior = iota
-	rangeNotRequired
-)
 
 // DecodeFrom populates a QueryParams from a URL.
 func (qp *QueryParams) DecodeFrom(u *url.URL, rb rangeBehavior) error {
-	from, err := time.Parse(time.RFC3339Nano, u.Query().Get("from"))
-	if err != nil && rb == rangeRequired {
+	if err := qp.From.Parse(u.Query().Get("from")); err != nil && rb == rangeRequired {
 		return errors.Wrap(err, "parsing 'from'")
 	}
-	to, err := time.Parse(time.RFC3339Nano, u.Query().Get("to"))
-	if err != nil && rb == rangeRequired {
+	if err := qp.To.Parse(u.Query().Get("to")); err != nil && rb == rangeRequired {
 		return errors.Wrap(err, "parsing 'to'")
 	}
-	qp.From = from
-	qp.To = to
 	qp.Q = u.Query().Get("q")
 	_, qp.Regex = u.Query()["regex"]
 
@@ -61,59 +50,35 @@ func (qp *QueryParams) DecodeFrom(u *url.URL, rb rangeBehavior) error {
 	return nil
 }
 
-// EncodeTo encodes the QueryParams to the url.Values.
-func (qp *QueryParams) EncodeTo(u *url.URL) {
-	values := url.Values{}
-	values.Set("from", qp.From.Format(time.RFC3339Nano))
-	values.Set("to", qp.To.Format(time.RFC3339Nano))
-	values.Set("q", qp.Q)
-	if qp.Regex {
-		values.Set("regex", "true")
-	}
-	u.RawQuery = values.Encode()
+type rangeBehavior int
+
+const (
+	rangeRequired rangeBehavior = iota
+	rangeNotRequired
+)
+
+// ulidOrTime is how we interpret the From and To query params.
+// Users may specify a valid ULID, or an RFC3339Nano timestamp.
+// We prefer them in that order, and cross-populate the fields.
+type ulidOrTime struct {
+	ulid.ULID
+	time.Time
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
-// It parses the times as RFC3339Nano timestamps.
-func (qp *QueryParams) UnmarshalJSON(data []byte) error {
-	var intermediary struct {
-		From  string `json:"from"`
-		To    string `json:"to"`
-		Q     string `json:"q"`
-		Regex bool   `json:"regex"`
+// Parse a string, likely taken from a query param.
+func (ut *ulidOrTime) Parse(s string) error {
+	if id, err := ulid.Parse(s); err == nil {
+		ut.ULID = id
+		ut.Time = time.Unix(int64(id.Time()/1e3), int64(id.Time()%1e3))
+		return nil
 	}
-	if err := json.Unmarshal(data, &intermediary); err != nil {
-		return err
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		ut.ULID.SetEntropy(nil)
+		ut.ULID.SetTime(uint64(t.Unix()*1e3) + uint64(t.UnixNano()/1e6))
+		ut.Time = t
+		return nil
 	}
-	from, err := time.Parse(time.RFC3339Nano, intermediary.From)
-	if err != nil {
-		return errors.Wrap(err, "parsing 'from'")
-	}
-	to, err := time.Parse(time.RFC3339Nano, intermediary.To)
-	if err != nil {
-		return errors.Wrap(err, "parsing 'to'")
-	}
-	qp.From = from
-	qp.To = to
-	qp.Q = intermediary.Q
-	qp.Regex = intermediary.Regex
-	return nil
-}
-
-// MarshalJSON implements json.Marshaler.
-// It marshals the times as RFC3339Nano timestamps.
-func (qp *QueryParams) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		From  string `json:"from"`
-		To    string `json:"to"`
-		Q     string `json:"q"`
-		Regex bool   `json:"regex"`
-	}{
-		From:  qp.From.Format(time.RFC3339Nano),
-		To:    qp.To.Format(time.RFC3339Nano),
-		Q:     qp.Q,
-		Regex: qp.Regex,
-	})
+	return errors.Errorf("%s: can't parse as ULID or RFC3339 time", s)
 }
 
 // QueryResult contains statistics about, and matching records for, a query.
@@ -159,10 +124,10 @@ func (qr *QueryResult) EncodeTo(w http.ResponseWriter) {
 // DecodeFrom decodes the QueryResult from the HTTP response.
 func (qr *QueryResult) DecodeFrom(resp *http.Response) error {
 	var err error
-	if qr.Params.From, err = time.Parse(time.RFC3339Nano, resp.Header.Get(httpHeaderFrom)); err != nil {
+	if err = qr.Params.From.Parse(resp.Header.Get(httpHeaderFrom)); err != nil {
 		return errors.Wrap(err, "from")
 	}
-	if qr.Params.To, err = time.Parse(time.RFC3339Nano, resp.Header.Get(httpHeaderTo)); err != nil {
+	if err = qr.Params.To.Parse(resp.Header.Get(httpHeaderTo)); err != nil {
 		return errors.Wrap(err, "to")
 	}
 	qr.Params.Q = resp.Header.Get(httpHeaderQ)
