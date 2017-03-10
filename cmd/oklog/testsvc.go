@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -36,14 +37,23 @@ func runTestService(args []string) error {
 	if recsz <= 0 {
 		return errors.Errorf("with -id %q, minimum -size is %d", *id, presz+1+1)
 	}
-	const charset = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-	records := make([]string, 1000)
+	var (
+		charset = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+		wordMin = 5
+		wordMax = 20
+		records = make([]string, 10000)
+	)
 	for i := 0; i < len(records); i++ {
 		record := make([]rune, recsz)
-		for j := 0; j < recsz; j++ {
-			record[j] = rune(charset[rand.Intn(len(charset))])
+		wordLen := wordMin + rand.Intn(wordMax-wordMin)
+		for j := range record {
+			if (j % wordLen) == (wordLen - 1) {
+				record[j] = ' '
+			} else {
+				record[j] = rune(charset[rand.Intn(len(charset))])
+			}
 		}
-		records[i] = string(record)
+		records[i] = strings.TrimSpace(string(record))
 	}
 
 	// Prepare some statistics.
