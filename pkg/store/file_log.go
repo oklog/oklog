@@ -82,18 +82,15 @@ func (log *fileLog) Create() (WriteSegment, error) {
 func (log *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 	var (
 		begin    = time.Now()
-		fromULID = ulid.MustNew(ulid.Timestamp(qp.From), nil)
-		toULID   = ulid.MustNew(ulid.Timestamp(qp.To), nil)
-		segments = log.queryMatchingSegments(fromULID, toULID)
-		pass     = recordFilterBoundedPlain(fromULID, toULID, []byte(qp.Q))
+		segments = log.queryMatchingSegments(qp.From.ULID, qp.To.ULID)
+		pass     = recordFilterBoundedPlain(qp.From.ULID, qp.To.ULID, []byte(qp.Q))
 	)
-
 	if qp.Regex {
-		pass = recordFilterBoundedRegex(fromULID, toULID, regexp.MustCompile(qp.Q))
+		pass = recordFilterBoundedRegex(qp.From.ULID, qp.To.ULID, regexp.MustCompile(qp.Q))
 	}
 
 	// Time range should be inclusive, so we need a max value here.
-	if err := toULID.SetEntropy(ulidMaxEntropy); err != nil {
+	if err := qp.To.ULID.SetEntropy(ulidMaxEntropy); err != nil {
 		panic(err)
 	}
 
@@ -411,7 +408,7 @@ func recordFilterBoundedRegex(from, to ulid.ULID, q *regexp.Regexp) recordFilter
 // queryMatchingSegments returns a sorted slice of all segment files
 // that could possibly have records in the provided time range.
 func (log *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []string) {
-	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+	log.filesys.Walk(log.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}

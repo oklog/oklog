@@ -142,7 +142,7 @@ func readOnce(ctx context.Context, rcf ReadCloserFactory, addr string, sink chan
 // HTTPReadCloserFactory returns a ReadCloserFactory that converts the addr to a
 // URL via the addr2url function, makes a GET request via the client, and
 // returns the response body as the ReadCloser.
-func HTTPReadCloserFactory(client *http.Client, addr2url func(string) string) ReadCloserFactory {
+func HTTPReadCloserFactory(client Doer, addr2url func(string) string) ReadCloserFactory {
 	return func(ctx context.Context, addr string) (io.ReadCloser, error) {
 		req, err := http.NewRequest("GET", addr2url(addr), nil)
 		if err != nil {
@@ -157,4 +157,9 @@ func HTTPReadCloserFactory(client *http.Client, addr2url func(string) string) Re
 		}
 		return resp.Body, nil
 	}
+}
+
+// Doer models http.Client.
+type Doer interface {
+	Do(*http.Request) (*http.Response, error)
 }

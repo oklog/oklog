@@ -34,12 +34,23 @@ const (
 	APIPathClusterState   = "/_clusterstate"
 )
 
+// ClusterPeer models cluster.Peer.
+type ClusterPeer interface {
+	Current(cluster.PeerType) []string
+	State() map[string]interface{}
+}
+
+// Doer models http.Client.
+type Doer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 // API serves the store API.
 type API struct {
-	peer               *cluster.Peer
+	peer               ClusterPeer
 	log                Log
-	queryClient        *http.Client // should time out
-	streamClient       *http.Client // should not time out
+	queryClient        Doer // should time out
+	streamClient       Doer // should not time out
 	streamQueries      *queryRegistry
 	replicatedSegments prometheus.Counter
 	replicatedBytes    prometheus.Counter
@@ -49,9 +60,9 @@ type API struct {
 
 // NewAPI returns a usable API.
 func NewAPI(
-	peer *cluster.Peer,
+	peer ClusterPeer,
 	log Log,
-	queryClient, streamClient *http.Client,
+	queryClient, streamClient Doer,
 	replicatedSegments, replicatedBytes prometheus.Counter,
 	duration *prometheus.HistogramVec,
 	logger log.Logger,
@@ -363,6 +374,7 @@ func (a *API) handleInternalStream(w http.ResponseWriter, r *http.Request) {
 
 	pass := recordFilterPlain([]byte(qp.Q))
 	if qp.Regex {
+		// QueryParams.DecodeFrom validated the regex.
 		pass = recordFilterRegex(regexp.MustCompile(qp.Q))
 	}
 
