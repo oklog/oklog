@@ -11,8 +11,6 @@ import (
 
 	"github.com/pborman/uuid"
 	"github.com/prometheus/client_golang/prometheus"
-
-	"github.com/oklog/oklog/pkg/cluster"
 )
 
 // These are the ingest API URL paths.
@@ -27,7 +25,7 @@ const (
 
 // API serves the ingest API.
 type API struct {
-	peer              *cluster.Peer
+	peer              ClusterPeer
 	log               Log
 	timeout           time.Duration
 	pending           map[string]pendingSegment
@@ -45,9 +43,14 @@ type pendingSegment struct {
 	reading  bool
 }
 
+// ClusterPeer models cluster.Peer.
+type ClusterPeer interface {
+	State() map[string]interface{}
+}
+
 // NewAPI returns a usable ingest API.
 func NewAPI(
-	peer *cluster.Peer,
+	peer ClusterPeer,
 	log Log,
 	pendingSegmentTimeout time.Duration,
 	failedSegments, committedSegments, committedBytes prometheus.Counter,
