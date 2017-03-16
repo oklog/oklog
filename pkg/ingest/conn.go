@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -70,9 +71,10 @@ func HandleFastWriter(conn net.Conn, w *Writer, idGen IDGenerator, connectedClie
 	defer connectedClients.Dec()
 	defer conn.Close()
 	s := bufio.NewScanner(conn)
+	s.Split(scanLinesPreserveNewline)
 	for s.Scan() {
 		// TODO(pb): short writes are possible
-		if _, err := fmt.Fprintf(w, "%s %s\n", idGen(), s.Text()); err != nil {
+		if _, err := fmt.Fprintf(w, "%s %s", idGen(), s.Text()); err != nil {
 			return err
 		}
 	}
@@ -86,9 +88,10 @@ func HandleDurableWriter(conn net.Conn, w *Writer, idGen IDGenerator, connectedC
 	defer connectedClients.Dec()
 	defer conn.Close()
 	s := bufio.NewScanner(conn)
+	s.Split(scanLinesPreserveNewline)
 	for s.Scan() {
 		// TODO(pb): short writes are possible
-		if _, err := fmt.Fprintf(w, "%s %s\n", idGen(), s.Text()); err != nil {
+		if _, err := fmt.Fprintf(w, "%s %s", idGen(), s.Text()); err != nil {
 			return err
 		}
 		if err := w.Sync(); err != nil {
@@ -107,6 +110,20 @@ func HandleBulkWriter(conn net.Conn, w *Writer, idGen IDGenerator, connectedClie
 
 // IDGenerator should return unique record identifiers, i.e. ULIDs.
 type IDGenerator func() string
+
+// Like bufio.ScanLines, but retain the \n.
+func scanLinesPreserveNewline(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[0 : i+1], nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
 
 func newConnectionManager() *connectionManager {
 	return &connectionManager{
