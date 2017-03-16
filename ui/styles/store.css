@@ -1,0 +1,183 @@
+*,
+button,
+input,
+optgroup,
+select,
+textarea {
+	/*color: rgb(52, 73, 94);*/
+	color: rgb(44, 62, 80);
+	font-family: 'Droid Sans', sans-serif;
+	line-height: 100%;
+}
+
+a {
+	cursor: pointer;
+	text-decoration: none;
+}
+
+body, html {
+	background: rgb(250, 250, 250);
+	font-size: 62.5%;
+}
+
+div.container {
+	margin: 0 auto;
+	max-width: 160rem;
+	width: 90%;
+}
+
+div.debug {
+	background: rgb(255, 255, 255);
+	border: 0.1rem dashed rgb(197, 197, 197);
+	color: rgb(127, 140, 141);
+	font-family: 'Droid Sans Mono', monospace;
+	font-size: 1.6rem;
+	padding: 1.5rem;
+	text-align: center;
+}
+
+footer {
+	bottom: 0;
+	position: fixed;
+	width: 100%;
+}
+
+form#query {
+	background: rgb(255, 255, 255);
+	border: 0.1rem solid rgb(192, 192, 192);
+	box-shadow: 3px 3px 10px 0px rgba(0, 0, 0, 0.75);
+	font-size: 1.8rem;
+	min-width: 64rem;
+}
+
+form#query div.row {
+	align-items: center;
+	box-sizing: border-box;
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: row;
+	flex-wrap: nowrap;
+}
+
+form#query div.row:last-child {
+	justify-content: space-between;
+}
+
+form#query div.row:not(:first-child) {
+	border-top: 0.1rem solid rgb(240, 240, 240);
+}
+
+form#query div.term {
+	display: flex;
+	flex: 1 1 auto;
+}
+
+form#query div.range {
+	align-items: center;
+	display: flex;
+	padding: 1.2rem 1.6rem 1rem 1.6rem;
+}
+
+form#query div.regex {
+	margin: 0 1.2rem;
+}
+
+form#query input {
+	border: 0;
+	flex: 1 1 auto;
+	font-size: 2.4rem;
+	outline: 0;
+	padding: 1.4rem 1.6rem 0.8rem 1.6rem;
+}
+
+form#query input::-webkit-input-placeholder { /* WebKit, Blink, Edge */
+	color: rgb(127, 140, 141);
+}
+form#query input:-moz-placeholder { /* Mozilla Firefox 4 to 18 */
+	color: rgb(127, 140, 141);
+	opacity: 1;
+}
+form#query input::-moz-placeholder { /* Mozilla Firefox 19+ */
+	color: rgb(127, 140, 141);
+  	opacity: 1;
+}
+form#query input:-ms-input-placeholder { /* Internet Explorer 10-11 */
+	color: rgb(127, 140, 141);
+}
+
+form#query div.plan {
+	color: rgb(127, 140, 141);
+	font-size: 1.4rem;
+	padding: 1.8rem 1.6rem 0.8rem 1.6rem;
+}
+
+form#query div.result-info {
+	font-size: 1.4rem;
+	min-height: 1.6rem;
+	padding: 1.8rem 1.6rem 0.8rem 1.6rem;
+}
+
+form#query select {
+	background: transparent;
+	border: 0.1rem solid transparent;
+	border-radius: 0;
+	cursor: pointer;
+	font-weight: 700;
+	outline: 0;
+	padding: 0.8rem 0.4rem 0.8rem 1rem;
+}
+
+form#query select:focus {
+	border-color: rgb(127, 140, 141);
+}
+
+form#query select option {
+	direction: ltr;
+}
+
+nav {
+	position: fixed;
+	top: 2.4rem;
+	width: 100%;
+}
+
+section#result {
+	font-size: 1.6rem;
+	margin-top: 18rem;
+}
+
+section#result table {
+	border-collapse: collapse;
+	font-family: 'Droid Sans Mono', monospace;
+	width: 100vw;
+}
+
+section#result table tbody tr {
+	border-bottom: 0.1rem solid rgb(240, 240, 240);
+	border-top: 0.1rem solid rgb(240, 240, 240);
+}
+
+section#result table tbody tr.odd {
+	background: rgb(255, 255, 255);
+}
+
+section#result table tbody tr td {
+	line-height: 1.4em;
+	padding: 1.2rem 1rem 0.6rem 1rem;
+	padding-left: 3em;
+	text-indent: -2em;
+	white-space: pre-wrap;       /* css-3 */
+	white-space: normal;
+	word-wrap: break-word;       /* Internet Explorer 5.5+ */
+	word-break: break-all;
+}
+
+section#result table tbody tr td.ulid {
+	border-right: 0.1rem solid rgb(240, 240, 240);
+	color: rgb(149, 165, 166);
+	user-select: none;
+}
+
+section#result table tbody tr td span.highlight {
+	color: rgb(231, 76, 60);
+}

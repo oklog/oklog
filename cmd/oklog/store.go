@@ -19,6 +19,7 @@ import (
 	"github.com/oklog/oklog/pkg/fs"
 	"github.com/oklog/oklog/pkg/group"
 	"github.com/oklog/oklog/pkg/store"
+	"github.com/oklog/oklog/pkg/ui"
 )
 
 const (
@@ -48,6 +49,7 @@ func runStore(args []string) error {
 		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", defaultStoreSegmentReplicationFactor, "how many copies of each segment to replicate")
 		segmentRetain            = flagset.Duration("store.segment-retain", defaultStoreSegmentRetain, "retention period for segment files")
 		segmentPurge             = flagset.Duration("store.segment-purge", defaultStoreSegmentPurge, "purge deleted segment files after this long")
+		uiLocal                  = flagset.Bool("ui.local", false, "Ignores embedded files and goes straight to the filesystem")
 		filesystem               = flagset.String("filesystem", defaultFilesystem, "real, real-mmap, virtual, nop")
 		clusterPeers             = stringslice{}
 	)
@@ -282,6 +284,7 @@ func runStore(args []string) error {
 				}
 			}()
 			mux.Handle("/store/", http.StripPrefix("/store", api))
+			mux.Handle("/ui/", http.StripPrefix("/ui", ui.NewAPI(logger, *uiLocal)))
 			registerMetrics(mux)
 			registerProfile(mux)
 			return http.Serve(apiListener, mux)
