@@ -127,6 +127,7 @@ func (qr *queryRegistry) Match(segment []byte) {
 	// Match each record in the segment against the registered queries.
 	// Send any matches immediately.
 	s := bufio.NewScanner(bytes.NewReader(segment))
+	s.Split(scanLinesPreserveNewline)
 	for s.Scan() {
 		for c, qc := range qr.reg {
 			if qc.pass(s.Bytes()) {

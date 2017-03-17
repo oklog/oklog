@@ -383,8 +383,7 @@ func (a *API) handleInternalStream(w http.ResponseWriter, r *http.Request) {
 
 	// Thus, we range over the records chan.
 	for record := range records {
-		w.Write(record)
-		w.Write([]byte{'\n'})
+		w.Write(record) // includes trailing newline
 		flusher.Flush()
 	}
 }
@@ -434,23 +433,24 @@ func teeRecords(src io.Reader, dst ...io.Writer) (lo, hi ulid.ULID, n int, err e
 		w     = io.MultiWriter(dst...)
 		s     = bufio.NewScanner(src)
 	)
+	s.Split(scanLinesPreserveNewline)
 	for s.Scan() {
 		// ULID and record-count accounting.
-		if err := id.UnmarshalText(s.Bytes()[:ulid.EncodedSize]); err != nil {
+		line := s.Bytes()
+		if err := id.UnmarshalText(line[:ulid.EncodedSize]); err != nil {
 			return lo, hi, n, err
 		}
 		if first {
 			lo, first = id, false
 		}
-		hi, n = id, n+1
+		hi = id
 
 		// Copying.
-		if _, err := w.Write(s.Bytes()); err != nil {
+		n0, err := w.Write(line)
+		if err != nil {
 			return lo, hi, n, err
 		}
-		if _, err := w.Write([]byte{'\n'}); err != nil {
-			return lo, hi, n, err
-		}
+		n += n0
 	}
 	return lo, hi, n, s.Err() // EOF yields nil
 }

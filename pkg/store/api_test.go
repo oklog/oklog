@@ -1,8 +1,10 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,7 +16,44 @@ import (
 
 	"github.com/oklog/oklog/pkg/cluster"
 	"github.com/oklog/oklog/pkg/fs"
+	"github.com/oklog/ulid"
 )
+
+func TestTeeRecords(t *testing.T) {
+	var records = []string{
+		"01BB6RQR190000000000000000 Foo\n",
+		"01BB6RRTB70000000000000000 Bar\n",
+		"01BB6RT5GS0000000000000000 Baz\n",
+		"01BB6RV5R00000000000000000 Quux\n",
+	}
+	var (
+		src  = strings.NewReader(strings.Join(records, ""))
+		dsts = []io.Writer{
+			&bytes.Buffer{},
+			&bytes.Buffer{},
+			&bytes.Buffer{},
+		}
+	)
+
+	lo, hi, n, err := teeRecords(src, dsts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var totalSize int
+	for _, s := range records {
+		totalSize += len(s)
+	}
+	if want, have := totalSize, n; want != have {
+		t.Errorf("n: want %d, have %d", want, have)
+	}
+	if want, have := ulid.MustParse("01BB6RQR190000000000000000"), lo; want != have {
+		t.Errorf("lo: want %s, have %s", want.String(), have.String())
+	}
+	if want, have := ulid.MustParse("01BB6RV5R00000000000000000"), hi; want != have {
+		t.Errorf("hi: want %s, have %s", want.String(), have.String())
+	}
+}
 
 func TestAPIInternalQueryFromULID(t *testing.T) {
 	a, err := newFixtureAPI(t)
