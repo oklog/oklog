@@ -2,6 +2,7 @@ package fs
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,8 +110,13 @@ func (fs *virtualFilesystem) Walk(root string, walkFn filepath.WalkFunc) error {
 func (fs *virtualFilesystem) Lock(path string) (r Releaser, existed bool, err error) {
 	fs.mtx.Lock()
 	defer fs.mtx.Unlock()
-	if _, ok := fs.files[path]; ok {
-		return virtualReleaser(func() error { return fs.Remove(path) }), true, nil
+
+	// Simulate locked as nonempty file, so we can test recovery behavior.
+	if file, ok := fs.files[path]; ok {
+		existed = true
+		if file.Size() > 0 {
+			return nil, existed, fmt.Errorf("%s already exists and is locked", path)
+		}
 	}
 
 	// Copy/paste.
@@ -119,8 +125,8 @@ func (fs *virtualFilesystem) Lock(path string) (r Releaser, existed bool, err er
 		atime: time.Now(),
 		mtime: time.Now(),
 	}
-
-	return virtualReleaser(func() error { return fs.Remove(path) }), false, nil
+	fs.files[path].buf.WriteString("locked!")
+	return virtualReleaser(func() error { return fs.Remove(path) }), existed, nil
 }
 
 type virtualFile struct {

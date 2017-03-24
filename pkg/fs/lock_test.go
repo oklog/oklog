@@ -3,23 +3,22 @@ package fs
 import "testing"
 
 func TestLock(t *testing.T) {
-	for _, testcase := range []struct {
-		name    string
-		filesys Filesystem
-	}{
-		{"virtual", NewVirtualFilesystem()},
-		{"real", NewRealFilesystem(false)},
+	t.Parallel()
+
+	lock := "TESTLOCK"
+	for name, filesys := range map[string]Filesystem{
+		"virtual": NewVirtualFilesystem(),
+		"real":    NewRealFilesystem(false),
 	} {
-		lock := "TESTLOCK"
-		t.Run(testcase.name, func(t *testing.T) {
-			r, existed, err := testcase.filesys.Lock(lock)
+		t.Run(name, func(t *testing.T) {
+			r, existed, err := filesys.Lock(lock)
 			if err != nil {
 				t.Fatalf("initial claim: %v", err)
 			}
 			if existed {
 				t.Fatal("initial claim: lock file already exists")
 			}
-			if _, existed, _ = testcase.filesys.Lock(lock); !existed {
+			if _, existed, _ = filesys.Lock(lock); !existed {
 				t.Fatal("second claim: want existed true, have false")
 			}
 			if err := r.Release(); err != nil {
@@ -29,9 +28,9 @@ func TestLock(t *testing.T) {
 				t.Fatal("second release: want error, have none")
 			}
 		})
-		if testcase.filesys.Exists(lock) {
-			t.Errorf("%s: %s still exists", testcase.name, lock)
+		if filesys.Exists(lock) {
+			t.Errorf("%s: %s still exists", name, lock)
 		}
-		testcase.filesys.Remove(lock)
+		filesys.Remove(lock)
 	}
 }

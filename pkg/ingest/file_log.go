@@ -24,7 +24,7 @@ const (
 // All filesystem ops will be rooted at path root.
 func NewFileLog(filesys fs.Filesystem, root string) (Log, error) {
 	if err := filesys.MkdirAll(root); err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "creating path %s", root)
 	}
 	lock := filepath.Join(root, lockFile)
 	r, existed, err := filesys.Lock(lock)
@@ -32,7 +32,9 @@ func NewFileLog(filesys fs.Filesystem, root string) (Log, error) {
 		return nil, errors.Wrapf(err, "locking %s", lock)
 	}
 	if existed {
-		return nil, errors.Errorf("%s already exists; another process is running, or the file is stale", lock)
+		// The previous owner crashed, but we still got the lock.
+		// So this is like Prometheus "crash recovery" mode.
+		// But we don't have anything special we need to do.
 	}
 	if err := recoverSegments(filesys, root); err != nil {
 		return nil, errors.Wrap(err, "during recovery")
