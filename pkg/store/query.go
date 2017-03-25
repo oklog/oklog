@@ -63,12 +63,19 @@ type ulidOrTime struct {
 func (ut *ulidOrTime) Parse(s string) error {
 	if id, err := ulid.Parse(s); err == nil {
 		ut.ULID = id
-		ut.Time = time.Unix(int64(id.Time()/1e3), int64((id.Time()%1e3)*1e6))
+		var (
+			msec = id.Time()
+			sec  = int64(msec / 1000)
+			nsec = int64(msec%1000) * 1000000
+		)
+		ut.Time = time.Unix(sec, nsec).UTC()
 		return nil
 	}
 	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
 		ut.ULID.SetEntropy(nil)
-		ut.ULID.SetTime(uint64(t.UnixNano() / 1e6))
+		// Pass t.UTC to mirror ulid.Now, which does the same.
+		// (We use ulid.Now when generating ULIDs in the ingester.)
+		ut.ULID.SetTime(ulid.Timestamp(t.UTC()))
 		ut.Time = t
 		return nil
 	}

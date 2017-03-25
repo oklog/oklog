@@ -44,7 +44,7 @@ func TestQueryRegistry(t *testing.T) {
 	go qr.Match(makeSegment("no match", "abc foo def", "no match again"))
 	select {
 	case foo := <-fooc:
-		if want, have := nopulid+" abc foo def", string(foo); want != have {
+		if want, have := nopulid+" abc foo def\n", string(foo); want != have {
 			t.Errorf("want %q, have %q", want, have)
 		}
 	case <-time.After(time.Second):
@@ -68,7 +68,7 @@ func TestQueryRegistry(t *testing.T) {
 	go qr.Match(makeSegment("match on foo, but no foo registered", "abc bar def", "again, no match"))
 	select {
 	case bar := <-barc:
-		if want, have := nopulid+" abc bar def", string(bar); want != have {
+		if want, have := nopulid+" abc bar def\n", string(bar); want != have {
 			t.Errorf("want %q, have %q", want, have)
 		}
 	case <-time.After(time.Second):
