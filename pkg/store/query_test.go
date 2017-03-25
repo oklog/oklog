@@ -16,13 +16,17 @@ func TestULIDOrTimeParse(t *testing.T) {
 	t.Parallel()
 
 	for input, want := range map[string]ulidOrTime{
-		"01BB6RQR190000000000000000": {
-			ulid.MustParse("01BB6RQR190000000000000000"),
-			mustParseRFC3339("2017-03-14T16:59:40.585+01:00"),
+		"01BC3NABW20000000000000000": {
+			ulid.MustParse("01BC3NABW20000000000000000"),
+			mustParseRFC3339("2017-03-25T21:17:54.946Z"), // truncated
 		},
-		"2017-03-14T17:02:42.211235645+01:00": {
-			ulid.MustParse("01BB6RX9D30000000000000000"),
-			mustParseRFC3339("2017-03-14T17:02:42.211235645+01:00"),
+		"01BC3NABW21234567890123456": {
+			ulid.MustParse("01BC3NABW21234567890123456"),
+			mustParseRFC3339("2017-03-25T21:17:54.946Z"), // truncated
+		},
+		"2017-03-25T21:18:20.05731891Z": {
+			ulid.MustParse("01BC3NB4CS0000000000000000"),
+			mustParseRFC3339("2017-03-25T21:18:20.05731891Z"),
 		},
 	} {
 		t.Run(input, func(t *testing.T) {
@@ -38,7 +42,7 @@ func TestULIDOrTimeParse(t *testing.T) {
 }
 
 func mustParseRFC3339(s string) time.Time {
-	t, err := time.Parse(time.RFC3339Nano, s)
+	t, err := time.ParseInLocation(time.RFC3339Nano, s, time.UTC)
 	if err != nil {
 		panic(err)
 	}
