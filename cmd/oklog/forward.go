@@ -21,8 +21,10 @@ import (
 func runForward(args []string) error {
 	flagset := flag.NewFlagSet("forward", flag.ExitOnError)
 	var (
-		apiAddr  = flagset.String("api", "", "listen address for forward API (and metrics)")
-		prefixes = stringslice{}
+		apiAddr     = flagset.String("api", "", "listen address for forward API (and metrics)")
+		prefixes    = stringslice{}
+		ringBuf     = flagset.Bool("buf", false, "use a ring buffer to drop old messages when e.g. the ingestion engine fails")
+		ringBufSize = flagset.Int("bufsize", 1024, "ring buffer size (messages)")
 	)
 	flagset.Var(&prefixes, "prefix", "prefix annotated on each log record (repeatable)")
 	flagset.Usage = usageFor(flagset, "oklog forward [flags] <ingester> [<ingester>...]")
@@ -186,12 +188,33 @@ func runForward(args []string) error {
 			time.Sleep(backoff)
 			continue
 		}
+		var write func(string) (int, error)
+		var cancel func()
+
+		if *ringBuf {
+			bf := newBufferedForwarder(*ringBufSize, conn, prefix)
+			write = bf.add
+			cancel = func() {
+				err := bf.stop()
+				if err != nil {
+					//disconnect and log
+					disconnects.Inc()
+					level.Warn(logger).Log("disconnected_from", target.String(), "due_to", err)
+				}
+			}
+			go bf.start()
+		} else {
+			write = func(record string) (int, error) {
+				return fmt.Fprintf(conn, "%s%s\n", prefix, record)
+			}
+			cancel = func() {}
+		}
 
 		ok := s.Scan()
 		for ok {
 			// We enter the loop wanting to write s.Text() to the conn.
 			record := s.Text()
-			if n, err := fmt.Fprintf(conn, "%s%s\n", prefix, record); err != nil {
+			if n, err := write(record); err != nil {
 				disconnects.Inc()
 				level.Warn(logger).Log("disconnected_from", target.String(), "due_to", err)
 				break
@@ -207,6 +230,7 @@ func runForward(args []string) error {
 			forwardRecords.Inc()
 			ok = s.Scan()
 		}
+		cancel()
 		if !ok {
 			level.Info(logger).Log("stdin", "exhausted", "due_to", s.Err())
 			return nil
