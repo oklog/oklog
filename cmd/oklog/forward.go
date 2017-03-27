@@ -189,12 +189,12 @@ func runForward(args []string) error {
 			continue
 		}
 		var write func(string) (int, error)
-		var cancel func()
+		var stop func()
 
 		if *ringBuf {
 			bf := newBufferedForwarder(*ringBufSize, conn, prefix)
 			write = bf.add
-			cancel = func() {
+			stop = func() {
 				err := bf.stop()
 				if err != nil {
 					//disconnect and log
@@ -207,7 +207,7 @@ func runForward(args []string) error {
 			write = func(record string) (int, error) {
 				return fmt.Fprintf(conn, "%s%s\n", prefix, record)
 			}
-			cancel = func() {}
+			stop = func() {}
 		}
 
 		ok := s.Scan()
@@ -230,7 +230,7 @@ func runForward(args []string) error {
 			forwardRecords.Inc()
 			ok = s.Scan()
 		}
-		cancel()
+		stop()
 		if !ok {
 			level.Info(logger).Log("stdin", "exhausted", "due_to", s.Err())
 			return nil
