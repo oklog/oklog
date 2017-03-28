@@ -122,9 +122,27 @@ func runForward(args []string) error {
 	// These both outlive any individual connection to an ingester.
 	// TODO(pb): have flag for backpressure vs. drop
 	var (
-		s       = bufio.NewScanner(os.Stdin)
+		s       textScanner
 		backoff = time.Duration(0)
 	)
+	if *ringBuf {
+		rb := newRingBuffer(*ringBufSize)
+		go func() {
+			bufioScanner := bufio.NewScanner(os.Stdin)
+			ok := bufioScanner.Scan()
+			for ok {
+				record := s.Text()
+				rb.Put(record)
+				ok = s.Scan()
+			}
+			if !ok {
+				level.Info(logger).Log("stdin", "exhausted", "due_to", s.Err())
+			}
+		}()
+		s = rb
+	} else {
+		s = bufio.NewScanner(os.Stdin)
+	}
 
 	// Enter the connect and forward loop. We do this forever.
 	for ; ; urls = append(urls[1:], urls[0]) { // rotate thru URLs
@@ -188,33 +206,11 @@ func runForward(args []string) error {
 			time.Sleep(backoff)
 			continue
 		}
-		var write func(string) (int, error)
-		var stop func()
-
-		if *ringBuf {
-			bf := newBufferedForwarder(*ringBufSize, conn, prefix)
-			write = bf.add
-			stop = func() {
-				err := bf.stop()
-				if err != nil {
-					//disconnect and log
-					disconnects.Inc()
-					level.Warn(logger).Log("disconnected_from", target.String(), "due_to", err)
-				}
-			}
-			go bf.start()
-		} else {
-			write = func(record string) (int, error) {
-				return fmt.Fprintf(conn, "%s%s\n", prefix, record)
-			}
-			stop = func() {}
-		}
-
 		ok := s.Scan()
 		for ok {
 			// We enter the loop wanting to write s.Text() to the conn.
 			record := s.Text()
-			if n, err := write(record); err != nil {
+			if n, err := fmt.Fprintf(conn, "%s%s\n", prefix, record); err != nil {
 				disconnects.Inc()
 				level.Warn(logger).Log("disconnected_from", target.String(), "due_to", err)
 				break
@@ -230,7 +226,6 @@ func runForward(args []string) error {
 			forwardRecords.Inc()
 			ok = s.Scan()
 		}
-		stop()
 		if !ok {
 			level.Info(logger).Log("stdin", "exhausted", "due_to", s.Err())
 			return nil

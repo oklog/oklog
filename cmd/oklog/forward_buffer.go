@@ -2,16 +2,20 @@ package main
 
 import (
 	"container/ring"
-	"fmt"
-	"io"
 	"sync"
 )
 
-// bufferedForwarder is a fixed-length ring buffer. It can be used by a forwarder, to 'drop' messages instead of applying backpressure. See Issue #15
-type bufferedForwarder struct {
-	onward io.Writer
-	prefix string
-	max    int64
+type textScanner interface {
+	Scan() bool
+	Text() string
+	Err() error
+}
+
+// ringBuffer is a fixed-length ring buffer. It can be used by a forwarder, to 'drop' messages instead of applying backpressure. See Issue #15
+type ringBuffer struct {
+	//onward io.Writer
+	//prefix string
+	max int64
 
 	w *ring.Ring
 	r *ring.Ring
@@ -22,13 +26,25 @@ type bufferedForwarder struct {
 	err       error
 }
 
-func (bf *bufferedForwarder) status() (bool, int64) {
+func (bf *ringBuffer) Scan() bool {
+	return false
+}
+
+func (bf *ringBuffer) Text() string {
+	return bf.Get()
+}
+
+func (bf *ringBuffer) Err() error {
+	return nil
+}
+
+func (bf *ringBuffer) status() (bool, int64) {
 	bf.mutex.Lock()
 	defer bf.mutex.Unlock()
 	return bf.done, bf.remaining
 }
 
-func (bf *bufferedForwarder) inc(by int64) {
+func (bf *ringBuffer) inc(by int64) {
 	bf.mutex.Lock()
 	if bf.remaining+by > bf.max {
 		bf.remaining = bf.max
@@ -38,61 +54,38 @@ func (bf *bufferedForwarder) inc(by int64) {
 	bf.mutex.Unlock()
 }
 
-func (bf *bufferedForwarder) add(record string) (int, error) {
+func (bf *ringBuffer) Put(record string) (int, error) {
 	bf.w.Value = record
 	bf.w = bf.w.Next()
 	bf.inc(1)
 	return len(record) + 1, bf.err
 }
 
-func (bf *bufferedForwarder) start() {
-	for {
-		done, _ := bf.process()
-		if done {
-			return
-		}
+func (bf *ringBuffer) Get() string {
+	remaining := int64(0)
+	for remaining < 1 {
+		_, remaining = bf.status()
 	}
+	//TODO
+	v, _ := bf.r.Value.(string)
+	bf.r = bf.r.Next()
+	bf.inc(-1)
+	return v
 }
 
-func (bf *bufferedForwarder) process() (bool, bool) {
-	done, remaining := bf.status()
-	if done {
-		return true, false
-	}
-	if remaining > 0 {
-		v, ok := bf.r.Value.(string)
-		if ok {
-			bf.forward(v)
-		}
-		bf.r = bf.r.Next()
-		bf.inc(-1)
-		return false, true
-	}
-	return false, false
-}
-
-func (bf *bufferedForwarder) stop() error {
+func (bf *ringBuffer) stop() error {
 	bf.mutex.Lock()
 	defer bf.mutex.Unlock()
 	bf.done = true
 	return bf.err
 }
 
-func (bf *bufferedForwarder) forward(record string) {
-	_, err := fmt.Fprintf(bf.onward, "%s%s\n", bf.prefix, record)
-	if err != nil {
-		bf.err = err
-	}
-}
-
-func newBufferedForwarder(ringBufSize int, conn io.Writer, prefix string) *bufferedForwarder {
+func newRingBuffer(ringBufSize int) *ringBuffer {
 	r := ring.New(ringBufSize)
-	bf := &bufferedForwarder{
-		w:      r,
-		r:      r,
-		max:    int64(ringBufSize),
-		onward: conn,
-		prefix: prefix,
+	bf := &ringBuffer{
+		w:   r,
+		r:   r,
+		max: int64(ringBufSize),
 	}
 	return bf
 }
