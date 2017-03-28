@@ -22,7 +22,6 @@ type ringBuffer struct {
 
 	mutex     sync.Mutex
 	remaining int64
-	done      bool
 	err       error
 }
 
@@ -38,10 +37,10 @@ func (bf *ringBuffer) Err() error {
 	return nil
 }
 
-func (bf *ringBuffer) status() (bool, int64) {
+func (bf *ringBuffer) Remaining() int64 {
 	bf.mutex.Lock()
 	defer bf.mutex.Unlock()
-	return bf.done, bf.remaining
+	return bf.remaining
 }
 
 func (bf *ringBuffer) inc(by int64) {
@@ -64,20 +63,12 @@ func (bf *ringBuffer) Put(record string) (int, error) {
 func (bf *ringBuffer) Get() string {
 	remaining := int64(0)
 	for remaining < 1 {
-		_, remaining = bf.status()
+		remaining = bf.Remaining()
 	}
-	//TODO
 	v, _ := bf.r.Value.(string)
 	bf.r = bf.r.Next()
 	bf.inc(-1)
 	return v
-}
-
-func (bf *ringBuffer) stop() error {
-	bf.mutex.Lock()
-	defer bf.mutex.Unlock()
-	bf.done = true
-	return bf.err
 }
 
 func newRingBuffer(ringBufSize int) *ringBuffer {
