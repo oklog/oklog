@@ -134,9 +134,9 @@ func runForward(args []string) error {
 				bufioScanner := bufio.NewScanner(os.Stdin)
 				ok := bufioScanner.Scan()
 				for ok {
-					record := s.Text()
+					record := bufioScanner.Text()
 					rb.Put(record)
-					ok = s.Scan()
+					ok = bufioScanner.Scan()
 				}
 				if !ok {
 					level.Info(logger).Log("stdin", "exhausted", "due_to", s.Err())

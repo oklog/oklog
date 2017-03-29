@@ -34,7 +34,7 @@ func (bf *ringBuffer) Text() string {
 }
 
 func (bf *ringBuffer) Err() error {
-	return nil
+	return bf.err
 }
 
 func (bf *ringBuffer) Remaining() int64 {
@@ -60,6 +60,7 @@ func (bf *ringBuffer) Put(record string) (int, error) {
 	return len(record) + 1, bf.err
 }
 
+// blocks. Do we need a Get with timeout?
 func (bf *ringBuffer) Get() string {
 	remaining := int64(0)
 	for remaining < 1 {
