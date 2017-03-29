@@ -128,8 +128,6 @@ func runForward(args []string) error {
 	if *ringBuf {
 		rb := newRingBuffer(*ringBufSize)
 		go func() {
-			// TODO fix this timing issue. It seems to be necessary for my test case, not sure why yet
-			time.Sleep(time.Second)
 			for {
 				bufioScanner := bufio.NewScanner(os.Stdin)
 				ok := bufioScanner.Scan()
@@ -139,7 +137,7 @@ func runForward(args []string) error {
 					ok = bufioScanner.Scan()
 				}
 				if !ok {
-					level.Info(logger).Log("stdin", "exhausted", "due_to", s.Err())
+					level.Info(logger).Log("stdin", "exhausted", "due_to", bufioScanner.Err())
 				}
 			}
 		}()

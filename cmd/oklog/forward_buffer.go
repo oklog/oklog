@@ -26,7 +26,7 @@ type ringBuffer struct {
 }
 
 func (bf *ringBuffer) Scan() bool {
-	return false
+	return true
 }
 
 func (bf *ringBuffer) Text() string {
