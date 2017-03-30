@@ -149,6 +149,7 @@ func TestIsUnroutable(t *testing.T) {
 		{"127.128.129.130", true},
 		{"localhost", true},
 		{"foo", false},
+		{"::", true},
 	} {
 		t.Run(testcase.input, func(t *testing.T) {
 			if want, have := testcase.want, isUnroutable(testcase.input); want != have {
