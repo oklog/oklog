@@ -39,6 +39,7 @@ var (
 func runStore(args []string) error {
 	flagset := flag.NewFlagSet("store", flag.ExitOnError)
 	var (
+		debug                    = flagset.Bool("debug", false, "debug logging")
 		apiAddr                  = flagset.String("api", defaultAPIAddr, "listen address for store API")
 		clusterAddr              = flagset.String("cluster", defaultClusterAddr, "listen address for cluster")
 		storePath                = flagset.String("store.path", defaultStorePath, "path holding segment files for storage tier")
@@ -75,10 +76,14 @@ func runStore(args []string) error {
 	//                    +-----------+
 
 	// Logging.
+	var logLevel = level.AllowInfo()
+	if *debug {
+		logLevel = level.AllowAll()
+	}
 	var logger log.Logger
 	logger = log.NewLogfmtLogger(os.Stderr)
 	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
-	logger = level.NewFilter(logger, level.AllowAll())
+	logger = level.NewFilter(logger, logLevel)
 
 	// Instrumentation.
 	apiDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{

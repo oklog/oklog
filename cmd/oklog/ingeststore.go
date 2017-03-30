@@ -25,6 +25,7 @@ import (
 func runIngestStore(args []string) error {
 	flagset := flag.NewFlagSet("ingeststore", flag.ExitOnError)
 	var (
+		debug                    = flagset.Bool("debug", false, "debug logging")
 		apiAddr                  = flagset.String("api", defaultAPIAddr, "listen address for ingest and store APIs")
 		fastAddr                 = flagset.String("ingest.fast", defaultFastAddr, "listen address for fast (async) writes")
 		durableAddr              = flagset.String("ingest.durable", defaultDurableAddr, "listen address for durable (sync) writes")
@@ -78,10 +79,14 @@ func runIngestStore(args []string) error {
 	//                        +------------+
 
 	// Logging.
+	var logLevel = level.AllowInfo()
+	if *debug {
+		logLevel = level.AllowAll()
+	}
 	var logger log.Logger
 	logger = log.NewLogfmtLogger(os.Stderr)
 	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
-	logger = level.NewFilter(logger, level.AllowAll())
+	logger = level.NewFilter(logger, logLevel)
 
 	// Instrumentation.
 	connectedClients := prometheus.NewGaugeVec(prometheus.GaugeOpts{
