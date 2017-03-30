@@ -8,6 +8,7 @@ package cluster
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"strconv"
@@ -264,18 +265,21 @@ func (d *delegate) MergeRemoteState(buf []byte, join bool) {
 // The Node argument must not be modified.
 // Implements memberlist.EventDelegate.
 func (d *delegate) NotifyJoin(n *memberlist.Node) {
+	level.Debug(d.logger).Log("received", "NotifyJoin", "node", n.Name, "addr", fmt.Sprintf("%s:%d", n.Addr, n.Port))
 }
 
 // NotifyUpdate is invoked when a node is detected to have updated, usually
 // involving the meta data. The Node argument must not be modified.
 // Implements memberlist.EventDelegate.
 func (d *delegate) NotifyUpdate(n *memberlist.Node) {
+	level.Debug(d.logger).Log("received", "NotifyUpdate", "node", n.Name, "addr", fmt.Sprintf("%s:%d", n.Addr, n.Port))
 }
 
 // NotifyLeave is invoked when a node is detected to have left.
 // The Node argument must not be modified.
 // Implements memberlist.EventDelegate.
 func (d *delegate) NotifyLeave(n *memberlist.Node) {
+	level.Debug(d.logger).Log("received", "NotifyLeave", "node", n.Name, "addr", fmt.Sprintf("%s:%d", n.Addr, n.Port))
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 	delete(d.data, n.Name)
