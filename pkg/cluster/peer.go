@@ -46,6 +46,7 @@ const (
 // We will listen for cluster communications on the given addr:port.
 // We advertise a PeerType HTTP API, reachable on apiPort.
 func NewPeer(addr string, port int, existing []string, t PeerType, apiPort int, logger log.Logger) (*Peer, error) {
+	level.Debug(logger).Log("cluster_addr", addr, "cluster_port", port, "ParseIP", net.ParseIP(addr).String())
 	d := newDelegate(logger)
 	conf := memberlistConfig(addr, port, d, d)
 	ml, err := memberlist.Create(conf)
