@@ -21,10 +21,13 @@ import (
 func runForward(args []string) error {
 	flagset := flag.NewFlagSet("forward", flag.ExitOnError)
 	var (
+		debug        = flagset.Bool("debug", false, "debug logging")
 		apiAddr      = flagset.String("api", "", "listen address for forward API (and metrics)")
 		prefixes     = stringslice{}
 		backpressure = flagset.String("backpressure", "block", "block, buffer")
 		bufferSize   = flagset.Int("buffer-size", 1024, "in -backpressure=buffer mode, ringbuffer size in records")
+		apiAddr      = flagset.String("api", "", "listen address for forward API (and metrics)")
+		prefixes     = stringslice{}
 	)
 	flagset.Var(&prefixes, "prefix", "prefix annotated on each log record (repeatable)")
 	flagset.Usage = usageFor(flagset, "oklog forward [flags] <ingester> [<ingester>...]")
@@ -38,9 +41,15 @@ func runForward(args []string) error {
 
 	// Logging.
 	var logger log.Logger
-	logger = log.NewLogfmtLogger(os.Stderr)
-	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
-	logger = level.NewFilter(logger, level.AllowAll())
+	{
+		logLevel := level.AllowInfo()
+		if *debug {
+			logLevel = level.AllowAll()
+		}
+		logger = log.NewLogfmtLogger(os.Stderr)
+		logger = log.With(logger, "ts", log.DefaultTimestampUTC)
+		logger = level.NewFilter(logger, logLevel)
+	}
 
 	// Instrumentation.
 	forwardBytes := prometheus.NewCounter(prometheus.CounterOpts{
@@ -206,6 +215,7 @@ func runForward(args []string) error {
 			time.Sleep(backoff)
 			continue
 		}
+
 		ok := s.Scan()
 		for ok {
 			// We enter the loop wanting to write s.Text() to the conn.
