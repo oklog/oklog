@@ -26,8 +26,6 @@ func runForward(args []string) error {
 		prefixes     = stringslice{}
 		backpressure = flagset.String("backpressure", "block", "block, buffer")
 		bufferSize   = flagset.Int("buffer-size", 1024, "in -backpressure=buffer mode, ringbuffer size in records")
-		apiAddr      = flagset.String("api", "", "listen address for forward API (and metrics)")
-		prefixes     = stringslice{}
 	)
 	flagset.Var(&prefixes, "prefix", "prefix annotated on each log record (repeatable)")
 	flagset.Usage = usageFor(flagset, "oklog forward [flags] <ingester> [<ingester>...]")
