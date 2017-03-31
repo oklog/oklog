@@ -76,14 +76,16 @@ func runStore(args []string) error {
 	//                    +-----------+
 
 	// Logging.
-	var logLevel = level.AllowInfo()
-	if *debug {
-		logLevel = level.AllowAll()
-	}
 	var logger log.Logger
-	logger = log.NewLogfmtLogger(os.Stderr)
-	logger = log.With(logger, "ts", log.DefaultTimestampUTC)
-	logger = level.NewFilter(logger, logLevel)
+	{
+		logLevel := level.AllowInfo()
+		if *debug {
+			logLevel = level.AllowAll()
+		}
+		logger = log.NewLogfmtLogger(os.Stderr)
+		logger = log.With(logger, "ts", log.DefaultTimestampUTC)
+		logger = level.NewFilter(logger, logLevel)
+	}
 
 	// Instrumentation.
 	apiDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
