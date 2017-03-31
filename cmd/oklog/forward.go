@@ -21,10 +21,10 @@ import (
 func runForward(args []string) error {
 	flagset := flag.NewFlagSet("forward", flag.ExitOnError)
 	var (
-		apiAddr     = flagset.String("api", "", "listen address for forward API (and metrics)")
-		prefixes    = stringslice{}
-		ringBuf     = flagset.Bool("buf", false, "use a ring buffer to drop old messages when e.g. the ingestion engine fails")
-		ringBufSize = flagset.Int("bufsize", 1024, "ring buffer size (messages)")
+		apiAddr      = flagset.String("api", "", "listen address for forward API (and metrics)")
+		prefixes     = stringslice{}
+		backpressure = flagset.String("backpressure", "block", "block, buffer")
+		bufferSize   = flagset.Int("buffer-size", 1024, "in -backpressure=buffer mode, ringbuffer size in records")
 	)
 	flagset.Var(&prefixes, "prefix", "prefix annotated on each log record (repeatable)")
 	flagset.Usage = usageFor(flagset, "oklog forward [flags] <ingester> [<ingester>...]")
@@ -118,6 +118,13 @@ func runForward(args []string) error {
 		urls[i], urls[j] = urls[j], urls[i]
 	}
 
+	// textScanner models bufio.Scanner, so we can provide
+	// an alternate ringbuffered implementation.
+	type textScanner interface {
+		Scan() bool
+		Text() string
+		Err() error
+	}
 	// Build a scanner for the input, and the last record we scanned.
 	// These both outlive any individual connection to an ingester.
 	// TODO(pb): have flag for backpressure vs. drop
@@ -125,27 +132,18 @@ func runForward(args []string) error {
 		s       textScanner
 		backoff = time.Duration(0)
 	)
-	if *ringBuf {
-		rb := newRingBuffer(*ringBufSize)
-		go func() {
-			for {
-				bufioScanner := bufio.NewScanner(os.Stdin)
-				ok := bufioScanner.Scan()
-				for ok {
-					record := bufioScanner.Text()
-					rb.Put(record)
-					ok = bufioScanner.Scan()
-				}
-				if !ok {
-					level.Info(logger).Log("stdin", "exhausted", "due_to", bufioScanner.Err())
-				}
-			}
-		}()
-		s = rb
-	} else {
+	switch strings.ToLower(*backpressure) {
+	case "block":
 		s = bufio.NewScanner(os.Stdin)
+	case "buffer":
+		// e.g. from below
+		rb := newRingBuffer(*bufferSize)
+		go rb.Consume(os.Stdin)
+		s = rb
+	default:
+		level.Error(logger).Log("backpressure", *backpressure, "err", "invalid backpressure option")
+		os.Exit(1)
 	}
-
 	// Enter the connect and forward loop. We do this forever.
 	for ; ; urls = append(urls[1:], urls[0]) { // rotate thru URLs
 		// We gonna try to connect to this first one.
