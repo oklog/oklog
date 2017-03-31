@@ -72,12 +72,16 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 	}
 	select {
 	case err := <-errc:
-		t.Logf("HandleConnections returned: %v", err)
+		t.Logf("HandleConnections successfully torn down (%v)", err)
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for shutdown")
 	}
-	if post := atomic.LoadUint64(&fs.closures); post-pre != 1 {
-		t.Errorf("pre=%d, post=%d", pre, post)
+	var post uint64
+	if !within(time.Second, func() bool {
+		post = atomic.LoadUint64(&fs.closures)
+		return (post - pre) > 0
+	}) {
+		t.Errorf("timeout waiting for Close: initial Closes=%d, current Closes=%d", pre, post)
 	}
 
 	// Make sure we can't write to the conn at some point.
