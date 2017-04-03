@@ -9,7 +9,7 @@ import (
 )
 
 // bounded buffer should store messages whenever a consumer falls behind
-type buffer interface {
+type boundedBuffer interface {
 	Put(string)  // Put should not block
 	Get() string // Get should block until data is available
 }
@@ -17,7 +17,7 @@ type buffer interface {
 // bufferedScanner composes a buffer to make it behave akin to a Scanner
 // bufferedScanner does not need to be thread-safe (but the composed buffer does)
 type bufferedScanner struct {
-	buf   buffer
+	buf   boundedBuffer
 	val   string //temporary place to store a val after a Scan()
 	err   error
 	mutex sync.RWMutex

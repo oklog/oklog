@@ -4,28 +4,25 @@ import (
 	"sync"
 )
 
-// sliceBuffer is a fixed-length buffer. It can be used by a forwarder, to 'drop' messages instead of applying backpressure. See Issue #15
+// sliceBuffer is a fixed-length ring buffer. It can be used by a forwarder, to 'drop' messages instead of applying backpressure. See Issue #15
 type sliceBuffer struct {
-	//onward io.Writer
-	//prefix string
 	max int
 
 	buf   []string
-	first int
-	last  int
-	ch    chan string
+	first int         // the index of the first item in the buffer
+	last  int         // the index of the last item in the buffer
+	ch    chan string // the channel is used to block on the Get method
 	mutex sync.RWMutex
 }
 
-// Put forwards right away when data is needed
+// Put forwards right away
 func (b *sliceBuffer) Put(record string) {
 	select {
 	case b.ch <- record:
 	default:
-		if int(b.Len()) >= b.max {
+		if b.Len() >= b.max {
 			// Drop record
-			// Note that I originally tried to Shift off data off the beginning, and put this record onto the buffer.
-			// But it's cheaper just to discard this record instead..
+			// Note: another alternative would have been to move the 'first' value before putting this record onto the buffer, but it's easier and marginally cheaper to just drop the incoming record.
 			return
 		}
 		b.mutex.Lock()
@@ -43,14 +40,11 @@ func (b *sliceBuffer) Put(record string) {
 // Get blocks when no data is available
 func (b *sliceBuffer) Get() string {
 	var record string
-	b.mutex.RLock()
-	if len(b.buf) < 1 {
-		b.mutex.RUnlock()
+	if b.Len() < 1 {
 		//just block until available
 		record = <-b.ch
 		return record
 	}
-	b.mutex.RUnlock()
 	b.mutex.Lock()
 	record = b.buf[b.first]
 	if b.first >= b.max {
@@ -67,19 +61,16 @@ func (b *sliceBuffer) Len() int {
 	defer b.mutex.RUnlock()
 	if b.last >= b.first {
 		return b.last - b.first
-	} else {
-		return b.max - b.first + b.last + 1
 	}
-	return len(b.buf)
+	return b.max - b.first + b.last + 1
 }
 
 func newSliceBuffer(bufSize int) *sliceBuffer {
-	ch := make(chan string)
 	b := &sliceBuffer{
 		max:   bufSize,
 		buf:   make([]string, bufSize),
 		mutex: sync.RWMutex{},
-		ch:    ch,
+		ch:    make(chan string),
 	}
 	return b
 }

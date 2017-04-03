@@ -16,13 +16,13 @@ func BenchmarkSliceBuffer(b *testing.B) {
 }
 
 func testSliceBuffer(t testing.TB) {
-	var b buffer
+	var b boundedBuffer
 	bufferSize := 5
 	b = newSliceBuffer(bufferSize)
 	testBuffer(t, b, bufferSize)
 }
 
-func testBuffer(t testing.TB, b buffer, bufferSize int) {
+func testBuffer(t testing.TB, b boundedBuffer, bufferSize int) {
 	msgCount := 10
 	b.Put(fmt.Sprintf("%02d", 0))
 	b.Get()
