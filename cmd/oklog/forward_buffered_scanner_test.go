@@ -6,8 +6,8 @@ import (
 )
 
 func TestBufferedScanner(t *testing.T) {
-	sb := newSliceBuffer(3)
-	bs := bufferedScanner{
+	sb := NewRingBuffer(3)
+	bs := BufferedScanner{
 		buf: sb,
 	}
 	exp := []string{"hi", "ho", "yi", "yo"}
@@ -28,6 +28,5 @@ func TestBufferedScanner(t *testing.T) {
 		if bs.Text() != e {
 			t.Errorf("Buffer should return a specific value [%s] but received [%s]", e, bs.Text())
 		}
-		//	}
 	}
 }

@@ -18,7 +18,7 @@ func BenchmarkSliceBuffer(b *testing.B) {
 func testSliceBuffer(t testing.TB) {
 	var b boundedBuffer
 	bufferSize := 5
-	b = newSliceBuffer(bufferSize)
+	b = NewRingBuffer(bufferSize)
 	testBuffer(t, b, bufferSize)
 }
 
@@ -36,7 +36,7 @@ func testBuffer(t testing.TB, b boundedBuffer, bufferSize int) {
 
 func TestSliceBufferLen(t *testing.T) {
 	cap := 10
-	b := newSliceBuffer(cap)
+	b := NewRingBuffer(cap)
 	if b.Len() != 0 {
 		t.Errorf("Incorrect length %d != %d", b.Len(), 0)
 	}

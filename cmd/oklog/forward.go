@@ -143,8 +143,8 @@ func runForward(args []string) error {
 	case "block":
 		s = bufio.NewScanner(os.Stdin)
 	case "buffer":
-		b := newSliceBuffer(*bufferSize)
-		rb := &bufferedScanner{
+		b := NewRingBuffer(*bufferSize)
+		rb := &BufferedScanner{
 			buf: b,
 		}
 		go rb.Consume(os.Stdin)
