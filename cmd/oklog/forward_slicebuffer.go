@@ -11,6 +11,8 @@ type sliceBuffer struct {
 	max int
 
 	buf   []string
+	first int
+	last  int
 	ch    chan string
 	mutex sync.RWMutex
 }
@@ -28,6 +30,12 @@ func (b *sliceBuffer) Put(record string) {
 		}
 		b.mutex.Lock()
 		b.buf = append(b.buf, record)
+		b.buf[b.last] = record
+		if b.last >= b.max {
+			b.last = 0
+		} else {
+			b.last++
+		}
 		b.mutex.Unlock()
 	}
 }
@@ -44,7 +52,12 @@ func (b *sliceBuffer) Get() string {
 	}
 	b.mutex.RUnlock()
 	b.mutex.Lock()
-	record, b.buf = b.buf[0], b.buf[1:]
+	record = b.buf[b.first]
+	if b.first >= b.max {
+		b.first = 0
+	} else {
+		b.first++
+	}
 	b.mutex.Unlock()
 	return record
 }
@@ -52,6 +65,11 @@ func (b *sliceBuffer) Get() string {
 func (b *sliceBuffer) Len() int {
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
+	if b.last >= b.first {
+		return b.last - b.first
+	} else {
+		return b.max - b.first + b.last + 1
+	}
 	return len(b.buf)
 }
 
@@ -59,7 +77,7 @@ func newSliceBuffer(bufSize int) *sliceBuffer {
 	ch := make(chan string)
 	b := &sliceBuffer{
 		max:   bufSize,
-		buf:   []string{},
+		buf:   make([]string, bufSize),
 		mutex: sync.RWMutex{},
 		ch:    ch,
 	}

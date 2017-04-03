@@ -33,3 +33,42 @@ func testBuffer(t testing.TB, b buffer, bufferSize int) {
 		t.Logf(b.Get())
 	}
 }
+
+func TestSliceBufferLen(t *testing.T) {
+	cap := 10
+	b := newSliceBuffer(cap)
+	if b.Len() != 0 {
+		t.Errorf("Incorrect length %d != %d", b.Len(), 0)
+	}
+	c := 5
+	for i := 0; i < c; i++ {
+		b.Put(fmt.Sprintf("entry %d", i))
+	}
+	t.Logf("length %d (first: %d, last: %d, cap: %d)", b.Len(), b.first, b.last, cap)
+	if b.Len() != c {
+		t.Errorf("Incorrect length %d != %d", b.Len(), c)
+	}
+	//drain
+	for i := 0; i < c; i++ {
+		b.Get()
+	}
+	t.Logf("length %d (first: %d, last: %d, cap: %d)", b.Len(), b.first, b.last, cap)
+	if b.Len() != 0 {
+		t.Errorf("Incorrect length %d != %d", b.Len(), 0)
+	}
+
+	for i := 0; i < c; i++ {
+		b.Put(fmt.Sprintf("entry %d", i))
+	}
+	t.Logf("length %d (first: %d, last: %d, cap: %d)", b.Len(), b.first, b.last, cap)
+	//test over capacity
+	for i := 0; i < c; i++ {
+		b.Put(fmt.Sprintf("entry %d", i))
+	}
+
+	t.Logf("length %d (first: %d, last: %d, cap: %d)", b.Len(), b.first, b.last, cap)
+	if b.Len() != 10 {
+		t.Errorf("Incorrect length %d (expected: %d, first: %d, last: %d, cap: %d)", b.Len(), 10, b.first, b.last, cap)
+	}
+
+}
