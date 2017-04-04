@@ -15,18 +15,20 @@ type RingBuffer struct {
 	mutex sync.RWMutex // synchronizes changes to buf, first, last
 }
 
-// Put processes the record without blocking.
-// It either sends it over the channel, adds it to the buffer, or drops the record if the buffer is full.
+// Put() processes the record without blocking.
+// It's behaviour varies depending on the state of the buffer and any blocking Get() invocations
+// It either sends the record over the channel, adds it to the buffer, or drops the record if the buffer is full.
 func (b *RingBuffer) Put(record string) {
 	select {
-	case b.ch <- record:
+	case b.ch <- record: // no need to even add to the buffer if something is blocking on the channel
 	default:
-		if b.Len() >= b.max {
+		b.mutex.Lock()
+		defer b.mutex.Unlock()
+		if b.len() >= b.max {
 			// Drop record
 			// Note: another alternative would have been to move the 'first' value before putting this record onto the buffer, but it's easier and marginally cheaper to just drop the incoming record.
 			return
 		}
-		b.mutex.Lock()
 		b.buf = append(b.buf, record)
 		b.buf[b.last] = record
 		if b.last >= b.max {
@@ -34,32 +36,37 @@ func (b *RingBuffer) Put(record string) {
 		} else {
 			b.last++
 		}
-		b.mutex.Unlock()
 	}
 }
 
-// Get blocks when no data is available
+// Get() blocks when no data is available
 func (b *RingBuffer) Get() string {
 	var record string
-	if b.Len() < 1 {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	if b.len() < 1 {
 		//just block until available
 		record = <-b.ch
 		return record
 	}
-	b.mutex.Lock()
 	record = b.buf[b.first]
 	if b.first >= b.max {
 		b.first = 0
 	} else {
 		b.first++
 	}
-	b.mutex.Unlock()
 	return record
 }
 
+// Len() is just a synchronized version of len()
 func (b *RingBuffer) Len() int {
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
+	return b.len()
+}
+
+// len() does not lock. Assumes synchronization is handled in calling code
+func (b *RingBuffer) len() int {
 	if b.last >= b.first {
 		return b.last - b.first
 	}
