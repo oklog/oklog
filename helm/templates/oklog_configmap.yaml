@@ -34,7 +34,7 @@ data:
       -ingest.bulk tcp://0.0.0.0:3003 \
       -cluster tcp://$HOSTNAME.{{ template "fullname" $ }}.{{ $.Release.Namespace }}.svc.cluster.local:3009 \
       -store.segment-target-size 1000000 \
-      -store.segment-replication-factor 1 \
+      -store.segment-replication-factor 2 \
       -store.segment-retain 30m \
       -store.segment-purge 5m \
      {{- range $i := until $nodeCount }}

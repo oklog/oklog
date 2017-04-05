@@ -76,13 +76,15 @@ spec:
               subPath: start.sh
           ports:
             - name: service1
-              containerPort: 7650
+              containerPort: 3000
             - name: service2
-              containerPort: 7651
+              containerPort: 3001
             - name: service3
-              containerPort: 7653
+              containerPort: 3002
             - name: service4
-              containerPort: 7659
+              containerPort: 3003
+            - name: service5
+              containerPort: 3009
           resources:
 {{ toYaml .Values.resources | indent 12}}
   #volumeClaimTemplates:
