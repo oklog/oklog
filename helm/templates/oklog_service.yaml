@@ -1,0 +1,33 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: {{ template "fullname" . }}-service
+  labels:
+    app: {{ template "fullname" . }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+spec:
+  type: {{ .Values.serviceType }}
+  {{- if eq .Values.serviceType "LoadBalancer" }}
+  loadBalancerIP: {{ default "" .Values.loadBalancerIP }}
+  {{- end }}
+  selector:
+    app: {{ template "fullname" . }}
+  ports:
+    - name: service1
+      port: 7650
+      targetPort: 7650
+      protocol: TCP
+    - name: service2
+      port: 7651
+      targetPort: 7651
+      protocol: TCP
+    - name: service3
+      port: 7653
+      targetPort: 7653
+      protocol: TCP
+    - name: service4
+      port: 7659
+      targetPort: 7659
+      protocol: TCP
