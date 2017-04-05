@@ -16,5 +16,5 @@ servicePort: 3000
 # Configure
 resources:
   requests:
-    memory: 256Mi
-    cpu: 250m
+    memory: 128Mi
+    cpu: 125m

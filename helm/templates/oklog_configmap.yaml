@@ -28,15 +28,15 @@ data:
      #EOF
 
      /oklog ingeststore \
-      -api tcp://0.0.0.0:1000 \
-      -ingest.fast tcp://0.0.0.0:1001 \
-      -ingest.durable tcp://0.0.0.0:1002 \
-      -ingest.bulk tcp://0.0.0.0:1003 \
-      -cluster tcp://$HOSTNAME.{{ template "fullname" $ }}.{{ $.Release.Namespace }}.svc.cluster.local:1009 \
+      -api tcp://0.0.0.0:3000 \
+      -ingest.fast tcp://0.0.0.0:3001 \
+      -ingest.durable tcp://0.0.0.0:3002 \
+      -ingest.bulk tcp://0.0.0.0:3003 \
+      -cluster tcp://$HOSTNAME.{{ template "fullname" $ }}.{{ $.Release.Namespace }}.svc.cluster.local:3009 \
       -store.segment-target-size 1000000 \
       -store.segment-replication-factor 1 \
       -store.segment-retain 30m \
       -store.segment-purge 5m \
      {{- range $i := until $nodeCount }}
-      -peer {{ template "fullname" $ }}-{{$i}}.{{ template "fullname" $ }}.{{ $.Release.Namespace }}.svc.cluster.local:1009 \
+      -peer {{ template "fullname" $ }}-{{$i}}.{{ template "fullname" $ }}.{{ $.Release.Namespace }}.svc.cluster.local:3009 \
      {{- end }}

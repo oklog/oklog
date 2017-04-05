@@ -8,7 +8,7 @@ spec:
   template:
     metadata:
       labels:
-        app: {{ template "fullname" . }}
+        app: {{ template "fullname" . }}-logspout
         chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
         release: "{{ .Release.Name }}"
         heritage: "{{ .Release.Service }}"
@@ -23,7 +23,7 @@ spec:
             privileged: true
           env:
             - name: ROUTE_URIS
-              value: raw+tcp://{{ template "fullname" . }}.{{ $.Release.Namespace }}.svc.cluster.local:7651
+              value: raw+tcp://{{ template "fullname" . }}.{{ $.Release.Namespace }}.svc.cluster.local:3001
           image: gliderlabs/logspout:v3.1
           name: logspout
           volumeMounts:

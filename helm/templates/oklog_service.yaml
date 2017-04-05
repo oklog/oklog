@@ -15,19 +15,23 @@ spec:
   selector:
     app: {{ template "fullname" . }}
   ports:
-    - name: service1
-      port: 7650
-      targetPort: 7650
+    - name: api
+      port: 3000
+      targetPort: 3000
       protocol: TCP
-    - name: service2
-      port: 7651
-      targetPort: 7651
+    - name: ingest-fast
+      port: 3001
+      targetPort: 3001
       protocol: TCP
-    - name: service3
-      port: 7653
-      targetPort: 7653
+    - name: ingest-durable
+      port: 3002
+      targetPort: 3002
       protocol: TCP
-    - name: service4
-      port: 7659
-      targetPort: 7659
+    - name: ingest-bulk
+      port: 3003
+      targetPort: 3003
+      protocol: TCP
+    - name: ingest-cluster
+      port: 3009
+      targetPort: 3009
       protocol: TCP
