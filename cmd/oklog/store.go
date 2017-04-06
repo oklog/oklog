@@ -42,6 +42,7 @@ func runStore(args []string) error {
 		debug                    = flagset.Bool("debug", false, "debug logging")
 		apiAddr                  = flagset.String("api", defaultAPIAddr, "listen address for store API")
 		clusterAddr              = flagset.String("cluster", defaultClusterAddr, "listen address for cluster")
+		clusterAdvertiseAddr     = flagset.String("cluster.advertise-addr", "", "optional, explicit address to advertise in cluster")
 		storePath                = flagset.String("store.path", defaultStorePath, "path holding segment files for storage tier")
 		segmentConsumers         = flagset.Int("store.segment-consumers", defaultStoreSegmentConsumers, "concurrent segment consumers")
 		segmentTargetSize        = flagset.Int64("store.segment-target-size", defaultStoreSegmentTargetSize, "try to keep store segments about this size")
@@ -151,8 +152,20 @@ func runStore(args []string) error {
 		return err
 	}
 	level.Info(logger).Log("cluster", fmt.Sprintf("%s:%d", clusterHost, clusterPort))
+	var (
+		clusterAdvertiseHost string
+		clusterAdvertisePort int
+	)
+	if *clusterAdvertiseAddr != "" {
+		_, _, clusterAdvertiseHost, clusterAdvertisePort, err = parseAddr(*clusterAdvertiseAddr, defaultClusterPort)
+		if err != nil {
+			return err
+		}
+		level.Info(logger).Log("cluster_advertise", fmt.Sprintf("%s:%d", clusterAdvertiseHost, clusterAdvertisePort))
+	}
 
 	// Safety warning.
+	// TODO(pb): improve re: advertiseAddr
 	if hasNonlocal(clusterPeers) && isUnroutable(clusterHost) {
 		level.Warn(logger).Log("err", "this node advertises itself on an unroutable address", "addr", clusterHost)
 		level.Warn(logger).Log("err", "this node will be unreachable in the cluster")
@@ -194,6 +207,7 @@ func runStore(args []string) error {
 	// Create peer.
 	peer, err := cluster.NewPeer(
 		clusterHost, clusterPort,
+		clusterAdvertiseHost, clusterAdvertisePort,
 		clusterPeers,
 		cluster.PeerTypeStore, apiPort,
 		log.With(logger, "component", "cluster"),

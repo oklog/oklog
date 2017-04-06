@@ -39,7 +39,7 @@ func runStream(args []string) error {
 		asRegex = "&regex=true"
 	}
 
-	var offset int = ulid.EncodedSize + 1
+	var offset = ulid.EncodedSize + 1
 	if *withulid {
 		offset = 0
 	}
