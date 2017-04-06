@@ -46,6 +46,7 @@ func runIngest(args []string) error {
 		durableAddr           = flagset.String("ingest.durable", defaultDurableAddr, "listen address for durable (sync) writes")
 		bulkAddr              = flagset.String("ingest.bulk", defaultBulkAddr, "listen address for bulk (whole-segment) writes")
 		clusterAddr           = flagset.String("cluster", defaultClusterAddr, "listen address for cluster")
+		clusterAdvertiseAddr  = flagset.String("cluster.advertise-addr", "", "optional, explicit address to advertise in cluster")
 		ingestPath            = flagset.String("ingest.path", defaultIngestPath, "path holding segment files for ingest tier")
 		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", defaultIngestSegmentFlushSize, "flush segments after they grow to this size")
 		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", defaultIngestSegmentFlushAge, "flush segments after they are active for this long")
@@ -180,8 +181,20 @@ func runIngest(args []string) error {
 		return err
 	}
 	level.Info(logger).Log("cluster", fmt.Sprintf("%s:%d", clusterHost, clusterPort))
+	var (
+		clusterAdvertiseHost string
+		clusterAdvertisePort int
+	)
+	if *clusterAdvertiseAddr != "" {
+		_, _, clusterAdvertiseHost, clusterAdvertisePort, err = parseAddr(*clusterAdvertiseAddr, defaultClusterPort)
+		if err != nil {
+			return err
+		}
+		level.Info(logger).Log("cluster_advertise", fmt.Sprintf("%s:%d", clusterAdvertiseHost, clusterAdvertisePort))
+	}
 
 	// Safety warning.
+	// TODO(pb): improve re: advertiseAddr
 	if hasNonlocal(clusterPeers) && isUnroutable(clusterHost) {
 		level.Warn(logger).Log("err", "this node advertises itself on an unroutable address", "addr", clusterHost)
 		level.Warn(logger).Log("err", "this node will be unreachable in the cluster")
@@ -238,6 +251,7 @@ func runIngest(args []string) error {
 	// Create peer.
 	peer, err := cluster.NewPeer(
 		clusterHost, clusterPort,
+		clusterAdvertiseHost, clusterAdvertisePort,
 		clusterPeers,
 		cluster.PeerTypeIngest, apiPort,
 		log.With(logger, "component", "cluster"),

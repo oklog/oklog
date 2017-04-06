@@ -45,20 +45,47 @@ const (
 // NewPeer creates or joins a cluster with the existing peers.
 // We will listen for cluster communications on the given addr:port.
 // We advertise a PeerType HTTP API, reachable on apiPort.
-func NewPeer(addr string, port int, existing []string, t PeerType, apiPort int, logger log.Logger) (*Peer, error) {
+//
+// If advertiseAddr is not empty, we will advertise ourself as reachable for
+// cluster communications on that address; otherwise, memberlist will extract
+// the IP from the bound addr:port and advertise on that.
+func NewPeer(
+	addr string, port int,
+	advertiseAddr string, advertisePort int,
+	existing []string,
+	t PeerType, apiPort int,
+	logger log.Logger,
+) (*Peer, error) {
 	level.Debug(logger).Log("cluster_addr", addr, "cluster_port", port, "ParseIP", net.ParseIP(addr).String())
+
 	d := newDelegate(logger)
-	conf := memberlistConfig(addr, port, d, d)
-	ml, err := memberlist.Create(conf)
+	config := memberlist.DefaultLANConfig()
+	{
+		config.Name = uuid.New()
+		config.BindAddr = addr
+		config.BindPort = port
+		if advertiseAddr != "" {
+			level.Debug(logger).Log("advertise_addr", advertiseAddr, "advertise_port", advertisePort)
+			config.AdvertiseAddr = advertiseAddr
+			config.AdvertisePort = advertisePort
+		}
+		config.LogOutput = ioutil.Discard
+		config.Delegate = d
+		config.Events = d
+	}
+	ml, err := memberlist.Create(config)
 	if err != nil {
 		return nil, err
 	}
-	d.init(conf.Name, t, ml.LocalNode().Addr.String(), apiPort, ml.NumMembers)
+
+	d.init(config.Name, t, ml.LocalNode().Addr.String(), apiPort, ml.NumMembers)
 	n, _ := ml.Join(existing)
 	level.Debug(logger).Log("Join", n)
+
 	if len(existing) > 0 {
 		go warnIfAlone(ml, logger, 5*time.Second)
 	}
+
 	return &Peer{
 		ml: ml,
 		d:  d,
@@ -68,7 +95,7 @@ func NewPeer(addr string, port int, existing []string, t PeerType, apiPort int, 
 func warnIfAlone(ml *memberlist.Memberlist, logger log.Logger, d time.Duration) {
 	for range time.Tick(d) {
 		if n := ml.NumMembers(); n <= 1 {
-			level.Warn(logger).Log("NumMembers", n)
+			level.Warn(logger).Log("NumMembers", n, "msg", "I appear to be alone in the cluster")
 		}
 	}
 }
@@ -102,17 +129,6 @@ func (p *Peer) State() map[string]interface{} {
 		"n":        p.ml.NumMembers(),
 		"delegate": p.d.state(),
 	}
-}
-
-func memberlistConfig(addr string, port int, delegate memberlist.Delegate, events memberlist.EventDelegate) *memberlist.Config {
-	config := memberlist.DefaultLANConfig()
-	config.Name = uuid.New()
-	config.BindAddr = addr
-	config.BindPort = port
-	config.LogOutput = ioutil.Discard
-	config.Delegate = delegate
-	config.Events = events
-	return config
 }
 
 // delegate manages gossiped data: the set of peers, their type, and API port.
