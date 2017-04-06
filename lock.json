@@ -22,9 +22,7 @@
             "version": "v1.0.0",
             "revision": "c8b7051e392cf78efc6f82f20ff71e89f20e0ea3",
             "packages": [
-                ".",
-                "limio",
-                "wrapio"
+                "."
             ]
         },
         {
@@ -187,7 +185,6 @@
             "revision": "dd2f054febf4a6c00f2343686efb775948a8bff4",
             "packages": [
                 "expfmt",
-                "internal/bitbucket.org/ww/goautoneg",
                 "model"
             ]
         },
