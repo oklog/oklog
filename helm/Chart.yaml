@@ -1,7 +1,7 @@
 apiVersion: v1
 description: A distributed and coördination-free log management system 
 name: oklog
-version: 0.0.1
+version: 0.0.2
 keywords:
   - logging
   - log
@@ -13,4 +13,4 @@ maintainers: # (optional)
   - name: Kevin Minehart
     email: kminehart@wehco.com
 icon: https://github.com/oklog/oklog/raw/master/oklog.png
-appVersion: 0.2.0
+appVersion: 0.2.1

@@ -2,7 +2,7 @@
 
 # Docker image
 image: "oklog/oklog"
-imageTag: v0.2.0
+imageTag: v0.2.1
 imagePullPolicy: "Always"
 
 replicas: 4
