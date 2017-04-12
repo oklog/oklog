@@ -1,4 +1,4 @@
-package main
+package forward
 
 import (
 	"bufio"
@@ -8,8 +8,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-// boundedBuffer should store a buffer of messages whenever the consumer falls behind the producer
-type boundedBuffer interface {
+// BoundedBuffer should store a buffer of messages whenever the consumer falls behind the producer
+type BoundedBuffer interface {
 	Put(string)  // Put should not block
 	Get() string // Get should block until data is available
 }
@@ -17,10 +17,16 @@ type boundedBuffer interface {
 // BufferedScanner composes a boundedBuffer to make it behave akin to a Scanner
 // BufferedScanner's Scan()/Text() is not synchronised (but the composed buffer is)
 type BufferedScanner struct {
-	buf   boundedBuffer
+	Buf   BoundedBuffer
 	val   string //temporary place to store a val after a Scan(). Not synchronised (Use case does not require it)
 	err   error
 	mutex sync.RWMutex //synchronises access to err
+}
+
+func NewBufferedScanner(b BoundedBuffer) *BufferedScanner {
+	return &BufferedScanner{
+		Buf: b,
+	}
 }
 
 func (b *BufferedScanner) Consume(r io.Reader) {
@@ -28,7 +34,7 @@ func (b *BufferedScanner) Consume(r io.Reader) {
 	ok := bs.Scan()
 	for ok {
 		record := bs.Text()
-		b.buf.Put(record)
+		b.Buf.Put(record)
 		ok = bs.Scan()
 	}
 	if !ok {
@@ -43,7 +49,7 @@ func (b *BufferedScanner) Consume(r io.Reader) {
 }
 
 func (b *BufferedScanner) Scan() bool {
-	b.val = b.buf.Get()
+	b.val = b.Buf.Get()
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 	return b.err == nil

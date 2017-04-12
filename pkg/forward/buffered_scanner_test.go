@@ -1,4 +1,4 @@
-package main
+package forward
 
 import (
 	"io"
@@ -8,7 +8,7 @@ import (
 func TestBufferedScanner(t *testing.T) {
 	sb := NewRingBuffer(3)
 	bs := BufferedScanner{
-		buf: sb,
+		Buf: sb,
 	}
 	exp := []string{"hi", "ho", "yi", "yo"}
 	pr, pw := io.Pipe()

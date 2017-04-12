@@ -1,4 +1,4 @@
-package main
+package forward
 
 import (
 	"sync"
@@ -39,7 +39,7 @@ func (b *RingBuffer) Put(record string) {
 	}
 }
 
-// Get() blocks when no data is available
+// Get() blocks until data is available
 func (b *RingBuffer) Get() string {
 	var record string
 	b.mutex.Lock()
@@ -74,6 +74,9 @@ func (b *RingBuffer) len() int {
 }
 
 func NewRingBuffer(bufSize int) *RingBuffer {
+	if bufSize < 1 {
+		panic("buffer size should be greater than zero")
+	}
 	b := &RingBuffer{
 		max:   bufSize,
 		buf:   make([]string, bufSize),

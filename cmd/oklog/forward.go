@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	"github.com/oklog/oklog/pkg/forward"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -134,7 +135,6 @@ func runForward(args []string) error {
 	}
 	// Build a scanner for the input, and the last record we scanned.
 	// These both outlive any individual connection to an ingester.
-	// TODO(pb): have flag for backpressure vs. drop
 	var (
 		s       textScanner
 		backoff = time.Duration(0)
@@ -143,10 +143,7 @@ func runForward(args []string) error {
 	case "block":
 		s = bufio.NewScanner(os.Stdin)
 	case "buffer":
-		b := NewRingBuffer(*bufferSize)
-		rb := &BufferedScanner{
-			buf: b,
-		}
+		rb := forward.NewBufferedScanner(forward.NewRingBuffer(*bufferSize))
 		go rb.Consume(os.Stdin)
 		s = rb
 	default:
