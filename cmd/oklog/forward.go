@@ -125,5 +125,15 @@ func runForward(args []string) error {
 		urls[i], urls[j] = urls[j], urls[i]
 	}
 
-	return forward.Forward(os.Stdin, urls, prefix, logger, *backpressure, *bufferSize, disconnects, shortWrites, forwardBytes, forwardRecords)
+	f := &forward.Forwarder{
+		Prefix:         prefix,
+		Logger:         logger,
+		Backpressure:   *backpressure,
+		BufferSize:     *bufferSize,
+		Disconnects:    disconnects,
+		ShortWrites:    shortWrites,
+		ForwardBytes:   forwardBytes,
+		ForwardRecords: forwardRecords,
+	}
+	return f.Forward(os.Stdin, urls)
 }

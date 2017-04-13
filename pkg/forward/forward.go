@@ -22,6 +22,14 @@ type Counter interface {
 	Add(float64)
 }
 
+type NoOpCounter struct {
+}
+
+func (c NoOpCounter) Inc() {
+}
+func (c NoOpCounter) Add(i float64) {
+}
+
 type Forwarder struct {
 	Prefix         string
 	Logger         log.Logger
@@ -35,9 +43,13 @@ type Forwarder struct {
 
 func NewForwarder(prefix string, backpressure string) *Forwarder {
 	return &Forwarder{
-		Prefix:       prefix,
-		Backpressure: backpressure,
-		BufferSize:   1024, // default
+		Prefix:         prefix,
+		Backpressure:   backpressure,
+		BufferSize:     1024, // default
+		Disconnects:    NoOpCounter{},
+		ShortWrites:    NoOpCounter{},
+		ForwardBytes:   NoOpCounter{},
+		ForwardRecords: NoOpCounter{},
 	}
 }
 
@@ -146,6 +158,7 @@ func (f *Forwarder) Forward(r io.Reader, urls []*url.URL) error {
 			record := s.Text()
 			if n, err := fmt.Fprintf(conn, "%s%s\n", f.Prefix, record); err != nil {
 				disconnects.Inc()
+				level.Warn(logger)
 				level.Warn(logger).Log("disconnected_from", target.String(), "due_to", err)
 				break
 			} else if n < len(record)+1 {
