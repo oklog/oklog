@@ -16,6 +16,10 @@
   name = "github.com/google/btree"
 
 [[dependencies]]
+  name = "github.com/hashicorp/go-sockaddr"
+  revision = "acd314c5781ea706c710d9ea70069fd2e110d61d"
+
+[[dependencies]]
   branch = "master"
   name = "github.com/hashicorp/memberlist"
 
