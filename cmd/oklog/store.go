@@ -165,11 +165,12 @@ func runStore(args []string) error {
 	}
 
 	// Safety warning.
-	// TODO(pb): improve re: advertiseAddr
-	if hasNonlocal(clusterPeers) && isUnroutable(clusterBindHost) {
-		level.Warn(logger).Log("err", "this node advertises itself on an unroutable address", "addr", clusterBindHost)
+	if addr, err := cluster.CalculateAdvertiseAddress(clusterBindHost, clusterAdvertiseHost); err != nil {
+		level.Warn(logger).Log("err", "couldn't deduce an advertise address: "+err.Error())
+	} else if hasNonlocal(clusterPeers) && isUnroutable(addr.String()) {
+		level.Warn(logger).Log("err", "this node advertises itself on an unroutable address", "addr", addr.String())
 		level.Warn(logger).Log("err", "this node will be unreachable in the cluster")
-		level.Warn(logger).Log("err", "provide -cluster as a routable IP address or hostname")
+		level.Warn(logger).Log("err", "provide -cluster.advertise-addr as a routable IP address or hostname")
 	}
 
 	// Bind listeners.

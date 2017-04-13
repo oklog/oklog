@@ -187,13 +187,13 @@ func hasNonlocal(clusterPeers stringslice) bool {
 	return false
 }
 
-func isUnroutable(clusterHost string) bool {
-	if host, _, err := net.SplitHostPort(clusterHost); err == nil {
-		clusterHost = host
+func isUnroutable(addr string) bool {
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		addr = host
 	}
-	if ip := net.ParseIP(clusterHost); ip != nil && (ip.IsUnspecified() || ip.IsLoopback()) {
+	if ip := net.ParseIP(addr); ip != nil && (ip.IsUnspecified() || ip.IsLoopback()) {
 		return true // typically 0.0.0.0 or localhost
-	} else if ip == nil && strings.ToLower(clusterHost) == "localhost" {
+	} else if ip == nil && strings.ToLower(addr) == "localhost" {
 		return true
 	}
 	return false
