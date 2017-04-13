@@ -41,7 +41,7 @@ func runStore(args []string) error {
 	var (
 		debug                    = flagset.Bool("debug", false, "debug logging")
 		apiAddr                  = flagset.String("api", defaultAPIAddr, "listen address for store API")
-		clusterAddr              = flagset.String("cluster", defaultClusterAddr, "listen address for cluster")
+		clusterBindAddr          = flagset.String("cluster", defaultClusterAddr, "listen address for cluster")
 		clusterAdvertiseAddr     = flagset.String("cluster.advertise-addr", "", "optional, explicit address to advertise in cluster")
 		storePath                = flagset.String("store.path", defaultStorePath, "path holding segment files for storage tier")
 		segmentConsumers         = flagset.Int("store.segment-consumers", defaultStoreSegmentConsumers, "concurrent segment consumers")
@@ -147,11 +147,11 @@ func runStore(args []string) error {
 	if err != nil {
 		return err
 	}
-	_, _, clusterHost, clusterPort, err := parseAddr(*clusterAddr, defaultClusterPort)
+	_, _, clusterBindHost, clusterBindPort, err := parseAddr(*clusterBindAddr, defaultClusterPort)
 	if err != nil {
 		return err
 	}
-	level.Info(logger).Log("cluster", fmt.Sprintf("%s:%d", clusterHost, clusterPort))
+	level.Info(logger).Log("cluster_bind", fmt.Sprintf("%s:%d", clusterBindHost, clusterBindPort))
 	var (
 		clusterAdvertiseHost string
 		clusterAdvertisePort int
@@ -166,8 +166,8 @@ func runStore(args []string) error {
 
 	// Safety warning.
 	// TODO(pb): improve re: advertiseAddr
-	if hasNonlocal(clusterPeers) && isUnroutable(clusterHost) {
-		level.Warn(logger).Log("err", "this node advertises itself on an unroutable address", "addr", clusterHost)
+	if hasNonlocal(clusterPeers) && isUnroutable(clusterBindHost) {
+		level.Warn(logger).Log("err", "this node advertises itself on an unroutable address", "addr", clusterBindHost)
 		level.Warn(logger).Log("err", "this node will be unreachable in the cluster")
 		level.Warn(logger).Log("err", "provide -cluster as a routable IP address or hostname")
 	}
@@ -206,7 +206,7 @@ func runStore(args []string) error {
 
 	// Create peer.
 	peer, err := cluster.NewPeer(
-		clusterHost, clusterPort,
+		clusterBindHost, clusterBindPort,
 		clusterAdvertiseHost, clusterAdvertisePort,
 		clusterPeers,
 		cluster.PeerTypeStore, apiPort,

@@ -43,27 +43,27 @@ const (
 )
 
 // NewPeer creates or joins a cluster with the existing peers.
-// We will listen for cluster communications on the given addr:port.
+// We will listen for cluster communications on the bind addr:port.
 // We advertise a PeerType HTTP API, reachable on apiPort.
 //
 // If advertiseAddr is not empty, we will advertise ourself as reachable for
 // cluster communications on that address; otherwise, memberlist will extract
 // the IP from the bound addr:port and advertise on that.
 func NewPeer(
-	addr string, port int,
+	bindAddr string, bindPort int,
 	advertiseAddr string, advertisePort int,
 	existing []string,
 	t PeerType, apiPort int,
 	logger log.Logger,
 ) (*Peer, error) {
-	level.Debug(logger).Log("cluster_addr", addr, "cluster_port", port, "ParseIP", net.ParseIP(addr).String())
+	level.Debug(logger).Log("bind_addr", bindAddr, "bind_port", bindPort, "ParseIP", net.ParseIP(bindAddr).String())
 
 	d := newDelegate(logger)
 	config := memberlist.DefaultLANConfig()
 	{
 		config.Name = uuid.New()
-		config.BindAddr = addr
-		config.BindPort = port
+		config.BindAddr = bindAddr
+		config.BindPort = bindPort
 		if advertiseAddr != "" {
 			level.Debug(logger).Log("advertise_addr", advertiseAddr, "advertise_port", advertisePort)
 			config.AdvertiseAddr = advertiseAddr

@@ -30,7 +30,7 @@ func runIngestStore(args []string) error {
 		fastAddr                 = flagset.String("ingest.fast", defaultFastAddr, "listen address for fast (async) writes")
 		durableAddr              = flagset.String("ingest.durable", defaultDurableAddr, "listen address for durable (sync) writes")
 		bulkAddr                 = flagset.String("ingest.bulk", defaultBulkAddr, "listen address for bulk (whole-segment) writes")
-		clusterAddr              = flagset.String("cluster", defaultClusterAddr, "listen address for cluster")
+		clusterBindAddr          = flagset.String("cluster", defaultClusterAddr, "listen address for cluster")
 		clusterAdvertiseAddr     = flagset.String("cluster.advertise-addr", "", "optional, explicit address to advertise in cluster")
 		ingestPath               = flagset.String("ingest.path", defaultIngestPath, "path holding segment files for ingest tier")
 		segmentFlushSize         = flagset.Int("ingest.segment-flush-size", defaultIngestSegmentFlushSize, "flush segments after they grow to this size")
@@ -224,11 +224,11 @@ func runIngestStore(args []string) error {
 	if err != nil {
 		return err
 	}
-	_, _, clusterHost, clusterPort, err := parseAddr(*clusterAddr, defaultClusterPort)
+	_, _, clusterBindHost, clusterBindPort, err := parseAddr(*clusterBindAddr, defaultClusterPort)
 	if err != nil {
 		return err
 	}
-	level.Info(logger).Log("cluster", fmt.Sprintf("%s:%d", clusterHost, clusterPort))
+	level.Info(logger).Log("cluster_bind", fmt.Sprintf("%s:%d", clusterBindHost, clusterBindPort))
 	var (
 		clusterAdvertiseHost string
 		clusterAdvertisePort int
@@ -243,8 +243,8 @@ func runIngestStore(args []string) error {
 
 	// Safety warning.
 	// TODO(pb): improve re: advertiseAddr
-	if hasNonlocal(clusterPeers) && isUnroutable(clusterHost) {
-		level.Warn(logger).Log("err", "this node advertises itself on an unroutable address", "addr", clusterHost)
+	if hasNonlocal(clusterPeers) && isUnroutable(clusterBindHost) {
+		level.Warn(logger).Log("err", "this node advertises itself on an unroutable address", "addr", clusterBindHost)
 		level.Warn(logger).Log("err", "this node will be unreachable in the cluster")
 		level.Warn(logger).Log("err", "provide -cluster as a routable IP address or hostname")
 	}
@@ -310,7 +310,7 @@ func runIngestStore(args []string) error {
 
 	// Create peer.
 	peer, err := cluster.NewPeer(
-		clusterHost, clusterPort,
+		clusterBindHost, clusterBindPort,
 		clusterAdvertiseHost, clusterAdvertisePort,
 		clusterPeers,
 		cluster.PeerTypeIngestStore, apiPort,
