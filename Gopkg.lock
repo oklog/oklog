@@ -1,4 +1,4 @@
-memo = "aa2f7f5abd0f9e2693ae4ee6515b4cf304ead2f736c4deb49bcbe2f138d1b1c4"
+memo = "94e9415ae281d77a7cf85be310cfdd2ffef75e67d01526858da031618150fd6c"
 
 [[projects]]
   branch = "master"
@@ -73,7 +73,6 @@ memo = "aa2f7f5abd0f9e2693ae4ee6515b4cf304ead2f736c4deb49bcbe2f138d1b1c4"
   revision = "ed905158d87462226a13fe39ddf685ea65f1c11f"
 
 [[projects]]
-  branch = "master"
   name = "github.com/hashicorp/go-sockaddr"
   packages = ["."]
   revision = "acd314c5781ea706c710d9ea70069fd2e110d61d"
