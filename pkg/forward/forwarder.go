@@ -16,83 +16,83 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Count or add several values to a given counter. This could be a prometheus Counter
-type Counter interface {
-	Inc()
-	Add(float64)
-}
-
-type NoOpCounter struct {
-}
-
-func (c NoOpCounter) Inc() {
-}
-func (c NoOpCounter) Add(i float64) {
-}
-
+// Forwarder manages the connection from a logging source to an oklog ingester
+// Forwarder uses a Scanner (optionally a bufio.Scanner) to send individual messages over the wire.
 type Forwarder struct {
+	URLs           []*url.URL
 	Prefix         string
 	Logger         log.Logger
-	Backpressure   string
-	BufferSize     int
 	Disconnects    Counter
 	ShortWrites    Counter
 	ForwardBytes   Counter
 	ForwardRecords Counter
+	Scanner        func(r io.Reader) textScanner
 }
 
-func NewForwarder(prefix string, backpressure string) *Forwarder {
+// Blocking Forwarder will apply backpressure whilst an onward connection is unavailable, which is is the default behaviour for `oklog forward`.
+// Messages will never be dropped.
+func NewBlockingForwarder(urls []*url.URL, prefix string) *Forwarder {
+	textScannerFunc := func(r io.Reader) textScanner {
+		s := bufio.NewScanner(r)
+		return s
+	}
 	return &Forwarder{
+		URLs:           urls,
 		Prefix:         prefix,
-		Backpressure:   backpressure,
-		BufferSize:     1024, // default
 		Disconnects:    NoOpCounter{},
 		ShortWrites:    NoOpCounter{},
 		ForwardBytes:   NoOpCounter{},
 		ForwardRecords: NoOpCounter{},
+		Scanner:        textScannerFunc,
 	}
 }
 
-func (f *Forwarder) Forward(r io.Reader, urls []*url.URL) error {
-	disconnects := f.Disconnects
-	shortWrites := f.ShortWrites
-	forwardBytes := f.ForwardBytes
-	forwardRecords := f.ForwardRecords
+// Buffered Forwarder will buffer records whilst an onward connection is unavailable. Once the buffer is full, further messages are dropped.
+// bufferSize refers to the maximum number of log messages (rather than e.g. bytes) in the buffer
+func NewBufferedForwarder(urls []*url.URL, prefix string, bufferSize int) *Forwarder {
+	textScannerFunc := func(r io.Reader) textScanner {
+		rb := NewBufferedScanner(NewRingBuffer(bufferSize))
+		go rb.Consume(r)
+		return rb
+	}
+	return &Forwarder{
+		URLs:           urls,
+		Prefix:         prefix,
+		Disconnects:    NoOpCounter{},
+		ShortWrites:    NoOpCounter{},
+		ForwardBytes:   NoOpCounter{},
+		ForwardRecords: NoOpCounter{},
+		Scanner:        textScannerFunc,
+	}
+}
+
+func (f *Forwarder) Forward() (io.Writer, error) {
+	r, w := io.Pipe()
+	var err error
+	go func() {
+		err = f.ForwardTo(r)
+	}()
+	return w, err
+}
+
+func (f *Forwarder) ForwardTo(r io.Reader) error {
 	logger := f.Logger
 	if logger == nil {
 		w := log.NewSyncWriter(os.Stderr)
 		logger = log.NewLogfmtLogger(w)
 	}
-	backpressure := f.Backpressure
 
-	// textScanner models bufio.Scanner, so we can provide
-	// an alternate ringbuffered implementation.
-	type textScanner interface {
-		Scan() bool
-		Text() string
-		Err() error
-	}
 	// Build a scanner for the input, and the last record we scanned.
 	// These both outlive any individual connection to an ingester.
 	var (
 		s       textScanner
 		backoff = time.Duration(0)
 	)
-	switch strings.ToLower(backpressure) {
-	case "block":
-		s = bufio.NewScanner(r)
-	case "buffer":
-		rb := NewBufferedScanner(NewRingBuffer(f.BufferSize))
-		go rb.Consume(r)
-		s = rb
-	default:
-		level.Error(logger).Log("backpressure", backpressure, "err", "invalid backpressure option")
-		os.Exit(1)
-	}
+	s = f.Scanner(r)
 	// Enter the connect and forward loop. We do this forever.
-	for ; ; urls = append(urls[1:], urls[0]) { // rotate thru URLs
+	for ; ; f.URLs = append(f.URLs[1:], f.URLs[0]) { // rotate thru URLs
 		// We gonna try to connect to this first one.
-		target := urls[0]
+		target := f.URLs[0]
 
 		host, port, err := net.SplitHostPort(target.Host)
 		if err != nil {
@@ -142,7 +142,7 @@ func (f *Forwarder) Forward(r io.Reader, urls []*url.URL) error {
 				target.Scheme = proto // target.Host stays the same
 			}
 		}
-		level.Debug(logger).Log("raw_target", urls[0].String(), "resolved_target", target.String())
+		level.Debug(logger).Log("raw_target", f.URLs[0].String(), "resolved_target", target.String())
 
 		conn, err := net.Dial(target.Scheme, target.Host)
 		if err != nil {
@@ -157,20 +157,20 @@ func (f *Forwarder) Forward(r io.Reader, urls []*url.URL) error {
 			// We enter the loop wanting to write s.Text() to the conn.
 			record := s.Text()
 			if n, err := fmt.Fprintf(conn, "%s%s\n", f.Prefix, record); err != nil {
-				disconnects.Inc()
+				f.Disconnects.Inc()
 				level.Warn(logger)
 				level.Warn(logger).Log("disconnected_from", target.String(), "due_to", err)
 				break
 			} else if n < len(record)+1 {
-				shortWrites.Inc()
+				f.ShortWrites.Inc()
 				level.Warn(logger).Log("short_write_to", target.String(), "n", n, "less_than", len(record)+1)
 				break // TODO(pb): we should do something more sophisticated here
 			}
 
 			// Only once the write succeeds do we scan the next record.
 			backoff = 0 // reset the backoff on a successful write
-			forwardBytes.Add(float64(len(record)) + 1)
-			forwardRecords.Inc()
+			f.ForwardBytes.Add(float64(len(record)) + 1)
+			f.ForwardRecords.Inc()
 			ok = s.Scan()
 		}
 		if !ok {
@@ -194,4 +194,26 @@ func exponential(d time.Duration) time.Duration {
 		d = max
 	}
 	return d
+}
+
+// textScanner models bufio.Scanner, so we can provide
+// an alternate ringbuffered implementation.
+type textScanner interface {
+	Scan() bool
+	Text() string
+	Err() error
+}
+
+// Count or add several values to a given counter. This could be a prometheus Counter
+type Counter interface {
+	Inc()
+	Add(float64)
+}
+
+type NoOpCounter struct {
+}
+
+func (c NoOpCounter) Inc() {
+}
+func (c NoOpCounter) Add(i float64) {
 }

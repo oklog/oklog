@@ -125,15 +125,20 @@ func runForward(args []string) error {
 		urls[i], urls[j] = urls[j], urls[i]
 	}
 
-	f := &forward.Forwarder{
-		Prefix:         prefix,
-		Logger:         logger,
-		Backpressure:   *backpressure,
-		BufferSize:     *bufferSize,
-		Disconnects:    disconnects,
-		ShortWrites:    shortWrites,
-		ForwardBytes:   forwardBytes,
-		ForwardRecords: forwardRecords,
+	var f *forward.Forwarder
+	switch strings.ToLower(*backpressure) {
+	case "block":
+		f = forward.NewBlockingForwarder(urls, prefix)
+	case "buffer":
+		f = forward.NewBufferedForwarder(urls, prefix, *bufferSize)
+	default:
+		level.Error(logger).Log("backpressure", backpressure, "err", "invalid backpressure option")
+		os.Exit(1)
 	}
-	return f.Forward(os.Stdin, urls)
+	f.Logger = logger
+	f.Disconnects = disconnects
+	f.ShortWrites = shortWrites
+	f.ForwardBytes = forwardBytes
+	f.ForwardRecords = forwardRecords
+	return f.ForwardTo(os.Stdin)
 }
