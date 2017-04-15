@@ -18,6 +18,7 @@ import (
 
 // Forwarder manages the connection from a logging source to an oklog ingester
 // Forwarder uses a Scanner (optionally a bufio.Scanner) to send individual messages over the wire.
+// TODO add a cancellation method (using context.Context to interrupt forwarding)
 type Forwarder struct {
 	URLs           []*url.URL
 	Prefix         string
@@ -66,16 +67,7 @@ func NewBufferedForwarder(urls []*url.URL, prefix string, bufferSize int) *Forwa
 	}
 }
 
-func (f *Forwarder) Forward() (io.Writer, error) {
-	r, w := io.Pipe()
-	var err error
-	go func() {
-		err = f.ForwardTo(r)
-	}()
-	return w, err
-}
-
-func (f *Forwarder) ForwardTo(r io.Reader) error {
+func (f *Forwarder) Forward(r io.Reader) error {
 	logger := f.Logger
 	if logger == nil {
 		w := log.NewSyncWriter(os.Stderr)

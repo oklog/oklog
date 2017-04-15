@@ -140,5 +140,5 @@ func runForward(args []string) error {
 	f.ShortWrites = shortWrites
 	f.ForwardBytes = forwardBytes
 	f.ForwardRecords = forwardRecords
-	return f.ForwardTo(os.Stdin)
+	return f.Forward(os.Stdin)
 }
