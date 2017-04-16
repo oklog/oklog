@@ -13,6 +13,7 @@ func (b *RingBufferBCH) Put(record string) {
 		case b.ch <- record:
 			return
 		default:
+			// when buffer full, drop oldest record
 			<-b.ch
 		}
 	}
@@ -25,8 +26,8 @@ func (b *RingBufferBCH) Get() string {
 }
 
 func NewRingBufferBCH(bufSize int) *RingBufferBCH {
-	if bufSize < 1 {
-		panic("buffer size should be greater than zero")
+	if bufSize < 0 {
+		panic("buffer size should not be less than zero")
 	}
 	b := &RingBufferBCH{
 		maxSize: bufSize,
