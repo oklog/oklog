@@ -152,7 +152,7 @@ func TestRingBufferLen(t *testing.T) {
 	}
 
 	if b.Len() != 10 {
-		t.Errorf("Incorrect length %d (expected: %d, first: %d, last: %d, cap: %d)", b.Len(), 10, b.first, b.last, cap)
+		t.Errorf("Incorrect length %d (expected: %d, first: %d, last: %d, cap: %d)", b.Len(), 10, b.first, b.last(), cap)
 	}
 
 }
