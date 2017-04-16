@@ -1,7 +1,6 @@
 package forward
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -16,10 +15,6 @@ type RingBuffer struct {
 	mutex sync.RWMutex // synchronizes changes to buf, first, last
 }
 
-func (b *RingBuffer) diagnostics(t string) {
-	fmt.Printf("%s slice:%+v, slicelen:%d, first:%d, last:%d, len:%d \n", t, b.buf, len(b.buf), b.first, b.last(), b.len)
-}
-
 // Put() processes the record without blocking.
 // It's behaviour varies depending on the state of the buffer and any blocking Get() invocations
 // It either sends the record over the channel, adds it to the buffer, or drops the record if the buffer is full.
@@ -29,14 +24,12 @@ func (b *RingBuffer) Put(record string) {
 	default:
 		b.mutex.Lock()
 		defer b.mutex.Unlock()
-		b.diagnostics(">PUT:before")
 		b.buf[b.last()] = record
 		if b.len >= b.maxSize {
 			b.inc()
 		} else {
 			b.len++
 		}
-		b.diagnostics(">PUT:after")
 	}
 }
 
@@ -60,18 +53,16 @@ func (b *RingBuffer) last() int {
 func (b *RingBuffer) Get() string {
 	var record string
 	b.mutex.Lock()
-	defer b.mutex.Unlock()
 	if b.len < 1 {
-		b.diagnostics("GET>:no-data")
+		b.mutex.Unlock()
 		//just block until available
 		record = <-b.ch
 		return record
 	}
-	b.diagnostics("GET>:before")
+	defer b.mutex.Unlock()
 	record = b.buf[b.first]
 	b.inc()
 	b.len--
-	b.diagnostics("GET>:after")
 	return record
 }
 
