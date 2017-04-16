@@ -1,18 +1,23 @@
 package forward
 
 import (
+	"fmt"
 	"sync"
 )
 
 // RingBuffer is a fixed-length ring buffer. It can be used by a forwarder, to 'drop' messages instead of applying backpressure. See Issue #15
 type RingBuffer struct {
-	max int
+	maxSize int
 
 	buf   []string
 	first int          // the index of the first item in the buffer
-	last  int          // the index of the last item in the buffer
+	len   int          // the current length of the buffer
 	ch    chan string  // the channel is used to block on the Get method whenever data is unavailable
 	mutex sync.RWMutex // synchronizes changes to buf, first, last
+}
+
+func (b *RingBuffer) diagnostics(t string) {
+	fmt.Printf("%s slice:%+v, slicelen:%d, first:%d, last:%d, len:%d \n", t, b.buf, len(b.buf), b.first, b.last(), b.len)
 }
 
 // Put() processes the record without blocking.
@@ -24,19 +29,31 @@ func (b *RingBuffer) Put(record string) {
 	default:
 		b.mutex.Lock()
 		defer b.mutex.Unlock()
-		if b.len() >= b.max {
-			// Drop record
-			// Note: another alternative would have been to move the 'first' value before putting this record onto the buffer, but it's easier and marginally cheaper to just drop the incoming record.
-			return
-		}
-		b.buf = append(b.buf, record)
-		b.buf[b.last] = record
-		if b.last >= b.max {
-			b.last = 0
+		b.diagnostics(">PUT:before")
+		b.buf[b.last()] = record
+		if b.len >= b.maxSize {
+			b.inc()
 		} else {
-			b.last++
+			b.len++
 		}
+		b.diagnostics(">PUT:after")
 	}
+}
+
+func (b *RingBuffer) inc() {
+	if b.first >= b.maxSize-1 {
+		b.first = 0
+	} else {
+		b.first++
+	}
+}
+
+func (b *RingBuffer) last() int {
+	r := b.len + b.first
+	if r >= b.maxSize {
+		r -= b.maxSize
+	}
+	return r
 }
 
 // Get() blocks until data is available
@@ -44,17 +61,17 @@ func (b *RingBuffer) Get() string {
 	var record string
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	if b.len() < 1 {
+	if b.len < 1 {
+		b.diagnostics("GET>:no-data")
 		//just block until available
 		record = <-b.ch
 		return record
 	}
+	b.diagnostics("GET>:before")
 	record = b.buf[b.first]
-	if b.first >= b.max {
-		b.first = 0
-	} else {
-		b.first++
-	}
+	b.inc()
+	b.len--
+	b.diagnostics("GET>:after")
 	return record
 }
 
@@ -62,15 +79,7 @@ func (b *RingBuffer) Get() string {
 func (b *RingBuffer) Len() int {
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
-	return b.len()
-}
-
-// len() does not lock. Assumes synchronization is handled in calling code
-func (b *RingBuffer) len() int {
-	if b.last >= b.first {
-		return b.last - b.first
-	}
-	return b.max - b.first + b.last + 1
+	return b.len
 }
 
 func NewRingBuffer(bufSize int) *RingBuffer {
@@ -78,10 +87,12 @@ func NewRingBuffer(bufSize int) *RingBuffer {
 		panic("buffer size should be greater than zero")
 	}
 	b := &RingBuffer{
-		max:   bufSize,
-		buf:   make([]string, bufSize),
-		mutex: sync.RWMutex{},
-		ch:    make(chan string),
+		maxSize: bufSize,
+		buf:     make([]string, bufSize),
+		mutex:   sync.RWMutex{},
+		ch:      make(chan string),
+		first:   0,
+		len:     0,
 	}
 	return b
 }
