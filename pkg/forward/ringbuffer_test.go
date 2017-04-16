@@ -47,18 +47,18 @@ func TestRingBuffer(t *testing.T) {
 	testBuffer(t, b, bufferSize)
 }
 
-var tests = []struct {
-	Name          string
-	Size          int
-	Input         []string
-	FirstExpected string
-}{
-	{"Basic", 4, []string{"0", "1", "2", "3"}, "0"},
-	{"AroundCorner", 3, []string{"0", "1", "2", "3"}, "1"},
-	{"AroundCornerTwice", 3, []string{"0", "1", "2", "3", "4", "5", "6"}, "4"},
-}
-
-func TestRingBufferAroundCorner(t *testing.T) {
+// verifies that most recent messages are kept in the buffer
+func TestRingBufferMostRecent(t *testing.T) {
+	var tests = []struct {
+		Name          string
+		Size          int
+		Input         []string
+		FirstExpected string
+	}{
+		{"Basic", 4, []string{"0", "1", "2", "3"}, "0"},
+		{"AroundCorner", 3, []string{"0", "1", "2", "3"}, "1"},
+		{"AroundCornerTwice", 3, []string{"0", "1", "2", "3", "4", "5", "6"}, "4"},
+	}
 	for _, test := range tests {
 		b := NewRingBuffer(test.Size)
 		for _, message := range test.Input {
