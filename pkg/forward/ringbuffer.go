@@ -1,7 +1,6 @@
 package forward
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -21,7 +20,6 @@ type RingBuffer struct {
 // It either sends the record over the channel, adds it to the buffer, or drops the record if the buffer is full.
 func (b *RingBuffer) Put(record string) {
 	b.mutex.Lock()
-	fmt.Printf("PUT:before slice:%+v, slicelen:%d, first:%d, last:%d, len:%d \n", b.buf, len(b.buf), b.first, b.last(), b.len)
 	b.buf[b.last()] = record
 	if b.len >= b.maxSize {
 		b.inc()
