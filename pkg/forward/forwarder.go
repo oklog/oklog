@@ -52,7 +52,7 @@ func NewBlockingForwarder(urls []*url.URL, prefix string) *Forwarder {
 // bufferSize refers to the maximum number of log messages (rather than e.g. bytes) in the buffer
 func NewBufferedForwarder(urls []*url.URL, prefix string, bufferSize int) *Forwarder {
 	textScannerFunc := func(r io.Reader) textScanner {
-		rb := NewBufferedScanner(NewRingBuffer(bufferSize))
+		rb := NewBufferedScanner(NewRingBufferBCH(bufferSize))
 		go rb.Consume(r)
 		return rb
 	}
