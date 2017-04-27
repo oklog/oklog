@@ -73,6 +73,18 @@ func TestRingBufferMostRecent(t *testing.T) {
 	}
 }
 
+func testBuffer(t testing.TB, b BoundedBuffer, bufferSize int) {
+	msgCount := 10
+	b.Put(fmt.Sprintf("%02d", 0))
+	b.Get()
+	for i := 0; i < msgCount; i++ {
+		b.Put(fmt.Sprintf("%02d", i))
+	}
+	for i := 0; i < bufferSize; i++ {
+		b.Get()
+	}
+}
+
 func TestRingBufferBlocksWhenEmpty(t *testing.T) {
 	bufferSize := 3
 	buf := NewRingBuffer(bufferSize)
@@ -106,41 +118,6 @@ func TestRingBufferBlocksWhenEmpty(t *testing.T) {
 	}
 	if !blocked {
 		t.Errorf("Should have blocked")
-	}
-
-}
-
-func TestRingBufferLen(t *testing.T) {
-	cap := 10
-	b := NewRingBuffer(cap)
-	if b.Len() != 0 {
-		t.Errorf("Incorrect length %d != %d", b.Len(), 0)
-	}
-	c := 5
-	for i := 0; i < c; i++ {
-		b.Put(fmt.Sprintf("entry %d", i))
-	}
-	if b.Len() != c {
-		t.Errorf("Incorrect length %d != %d", b.Len(), c)
-	}
-	//drain
-	for i := 0; i < c; i++ {
-		b.Get()
-	}
-	if b.Len() != 0 {
-		t.Errorf("Incorrect length %d != %d", b.Len(), 0)
-	}
-
-	for i := 0; i < c; i++ {
-		b.Put(fmt.Sprintf("entry %d", i))
-	}
-	//test over capacity
-	for i := 0; i < c; i++ {
-		b.Put(fmt.Sprintf("entry %d", i))
-	}
-
-	if b.Len() != 10 {
-		t.Errorf("Incorrect length %d (expected: %d, first: %d, last: %d, cap: %d)", b.Len(), 10, b.first, b.last(), cap)
 	}
 
 }

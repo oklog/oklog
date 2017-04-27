@@ -7,7 +7,7 @@ import (
 )
 
 func TestBufferedScanner(t *testing.T) {
-	sb := NewRingBufferBCH(4)
+	sb := NewRingBuffer(4)
 	bs := BufferedScanner{
 		Buf: sb,
 	}
