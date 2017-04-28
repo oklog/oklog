@@ -1,14 +1,13 @@
 package forward
 
 import (
-	"fmt"
 	"io"
 	"testing"
 )
 
 func TestBufferedScanner(t *testing.T) {
 	sb := NewRingBuffer(4)
-	bs := BufferedScanner{
+	bs := bufferedScanner{
 		Buf: sb,
 	}
 	exp := []string{"hi", "ho", "yi", "yo"}
@@ -22,13 +21,13 @@ func TestBufferedScanner(t *testing.T) {
 		if i >= sb.maxSize-1 {
 			break
 		}
-		ok := bs.Scan()
-		if !ok {
-			t.Errorf("Buffer scan should return a value")
+		_, text, err := bs.Next()
+		if err != nil {
+			t.Errorf("Buffer should not return error. %v", err)
 		}
-		fmt.Println("Received", bs.Text())
-		if bs.Text() != e {
-			t.Errorf("Buffer should return a specific value [%s] but received [%s]", e, bs.Text())
+		t.Log("Received", text)
+		if text != e {
+			t.Errorf("Buffer should return a specific value [%s] but received [%s]", e, text)
 		}
 	}
 }

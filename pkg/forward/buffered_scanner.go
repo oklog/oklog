@@ -14,22 +14,21 @@ type BoundedBuffer interface {
 	Get() string // Get should block until data is available
 }
 
-// BufferedScanner composes a boundedBuffer to make it behave akin to a Scanner
-// BufferedScanner's Scan()/Text() is not synchronised (but the composed buffer is)
-type BufferedScanner struct {
+// bufferedScanner composes a boundedBuffer to make it behave akin to a Scanner
+// bufferedScanner's Scan()/Text() is not synchronised (but the composed buffer is)
+type bufferedScanner struct {
 	Buf   BoundedBuffer
-	val   string //temporary place to store a val after a Scan(). Not synchronised (Use case does not require it)
 	err   error
 	mutex sync.RWMutex //synchronises access to err
 }
 
-func NewBufferedScanner(b BoundedBuffer) *BufferedScanner {
-	return &BufferedScanner{
+func NewBufferedScanner(b BoundedBuffer) *bufferedScanner {
+	return &bufferedScanner{
 		Buf: b,
 	}
 }
 
-func (b *BufferedScanner) Consume(r io.Reader) {
+func (b *bufferedScanner) Consume(r io.Reader) {
 	bs := bufio.NewScanner(r)
 	ok := bs.Scan()
 	for ok {
@@ -39,28 +38,14 @@ func (b *BufferedScanner) Consume(r io.Reader) {
 	}
 	if !ok {
 		b.mutex.Lock()
-		if bs.Err() != nil {
-			b.err = errors.Wrapf(bs.Err(), "Error reading from input")
-		} else {
-			b.err = errors.Errorf("Error reading from input")
-		}
+		b.err = errors.Errorf("Error reading from input")
 		b.mutex.Unlock()
 	}
 }
 
-func (b *BufferedScanner) Scan() bool {
-	b.val = b.Buf.Get()
+func (b *bufferedScanner) Next() (bool, string, error) {
+	val := b.Buf.Get()
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
-	return b.err == nil
-}
-
-func (b *BufferedScanner) Text() string {
-	return b.val
-}
-
-func (b *BufferedScanner) Err() error {
-	b.mutex.RLock()
-	defer b.mutex.RUnlock()
-	return b.err
+	return b.err != nil, val, b.err
 }

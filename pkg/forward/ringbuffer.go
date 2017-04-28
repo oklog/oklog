@@ -1,13 +1,13 @@
 package forward
 
 // RingBuffer is a fixed-length ring buffer. It can be used by a forwarder, to 'drop' messages instead of applying backpressure. See Issue #15
-type RingBuffer struct {
+type ringBuffer struct {
 	maxSize int
 	ch      chan string // a buffered channel is used to buffer records
 }
 
 // Put() processes the record without blocking.
-func (b *RingBuffer) Put(record string) {
+func (b *ringBuffer) Put(record string) {
 	for {
 		select {
 		case b.ch <- record:
@@ -21,15 +21,15 @@ func (b *RingBuffer) Put(record string) {
 }
 
 // Get() blocks until data is available
-func (b *RingBuffer) Get() string {
+func (b *ringBuffer) Get() string {
 	return <-b.ch
 }
 
-func NewRingBuffer(bufSize int) *RingBuffer {
+func NewRingBuffer(bufSize int) *ringBuffer {
 	if bufSize < 0 {
 		panic("buffer size should not be less than zero")
 	}
-	b := &RingBuffer{
+	b := &ringBuffer{
 		maxSize: bufSize,
 		ch:      make(chan string, bufSize),
 	}
