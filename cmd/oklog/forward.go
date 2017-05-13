@@ -24,6 +24,8 @@ func runForward(args []string) error {
 		debug    = flagset.Bool("debug", false, "debug logging")
 		apiAddr  = flagset.String("api", "", "listen address for forward API (and metrics)")
 		prefixes = stringslice{}
+		drop     = flagset.Bool("drop", false, "drop messages when backpressure")
+		buffer   = flagset.Uint("buffer", 0, "number of buffer records")
 	)
 	flagset.Var(&prefixes, "prefix", "prefix annotated on each log record (repeatable)")
 	flagset.Usage = usageFor(flagset, "oklog forward [flags] <ingester> [<ingester>...]")
@@ -127,7 +129,7 @@ func runForward(args []string) error {
 	// These both outlive any individual connection to an ingester.
 	// TODO(pb): have flag for backpressure vs. drop
 	var (
-		s       = bufio.NewScanner(os.Stdin)
+		s       = newScanner(bufio.NewScanner(os.Stdin), int(*buffer), *drop)
 		backoff = time.Duration(0)
 	)
 
@@ -194,10 +196,13 @@ func runForward(args []string) error {
 			continue
 		}
 
-		ok := s.Scan()
-		for ok {
+		for {
 			// We enter the loop wanting to write s.Text() to the conn.
-			record := s.Text()
+			record, err := s.Next()
+			if err != nil {
+				level.Info(logger).Log("stdin", "exhausted", "due_to", err)
+				return nil
+			}
 			if n, err := fmt.Fprintf(conn, "%s%s\n", prefix, record); err != nil {
 				disconnects.Inc()
 				level.Warn(logger).Log("disconnected_from", target.String(), "due_to", err)
@@ -212,11 +217,6 @@ func runForward(args []string) error {
 			backoff = 0 // reset the backoff on a successful write
 			forwardBytes.Add(float64(len(record)) + 1)
 			forwardRecords.Inc()
-			ok = s.Scan()
-		}
-		if !ok {
-			level.Info(logger).Log("stdin", "exhausted", "due_to", s.Err())
-			return nil
 		}
 	}
 }
