@@ -24,7 +24,7 @@ import Html
         , text
         , tr
         )
-import Html.Attributes exposing (autofocus, class, for, id, placeholder, type_, value)
+import Html.Attributes exposing (autofocus, class, disabled, for, id, placeholder, type_, value)
 import Html.Events exposing (on, onClick, onInput, onSubmit, targetValue)
 import Http exposing (Request, Response, emptyBody, expectStringResponse, request, send)
 import Json.Decode as Json
@@ -48,12 +48,11 @@ main =
 
 
 type alias Model =
-    { isPlanned : Bool
-    , lastPlan : Time
-    , now : Time
+    { now : Time
     , query : Query
     , records : List Record
-    , stats : Stats
+    , stats : Maybe Stats
+    , streamRunning : Bool
     }
 
 
@@ -81,7 +80,7 @@ type alias Stats =
 
 init : ( Model, Cmd Msg )
 init =
-    ( Model False 0 0 initQuery [] initStats, Task.perform Tick Time.now )
+    ( Model 0 initQuery [] Nothing False, Task.perform Now Time.now )
 
 
 initQuery : Query
@@ -99,63 +98,89 @@ initStats =
 
 
 type Msg
-    = QueryFormSubmit
+    = Now Time
+    | Plan Time
+    | QueryFormSubmit
+    | QueryRegexUpdate String
     | QueryTermUpdate String
-    | QueryToggleRegex
     | QueryToUpdate String
     | QueryWindowUpdate String
     | StatsUpdate (Result Http.Error Stats)
+    | StreamCancel
     | StreamComplete String
     | StreamError String
     | StreamLines (List String)
-    | Tick Time
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        Now now ->
+            ( { model | now = now }, Cmd.none )
+
+        Plan now ->
+            let
+                cmd =
+                    if model.query.term /= "" then
+                        getStats now model.query
+                    else
+                        Cmd.none
+            in
+                ( { model | now = now }, cmd )
+
         QueryFormSubmit ->
-            ( { model | records = [] }, getRecords model.now model.query )
+            ( { model | records = [], streamRunning = True }, getRecords model.now model.query )
+
+        QueryRegexUpdate val ->
+            let
+                regex =
+                    if val == "regex" then
+                        True
+                    else
+                        False
+
+                query =
+                    model.query
+            in
+                ( { model | query = { query | regex = regex } }, Cmd.none )
 
         QueryTermUpdate term ->
             let
                 query =
                     model.query
             in
-                ( { model | isPlanned = False, query = { query | term = term } }, Cmd.none )
-
-        QueryToggleRegex ->
-            let
-                query =
-                    model.query
-            in
-                ( { model | query = { query | regex = not query.regex } }, Cmd.none )
+                ( { model | query = { query | term = term }, stats = Nothing }
+                , Task.perform Plan Time.now
+                )
 
         QueryToUpdate to ->
             let
                 query =
                     model.query
             in
-                ( { model | isPlanned = False, query = { query | to = to } }, Cmd.none )
+                ( { model | query = { query | to = to }, stats = Nothing }, Cmd.none )
 
         QueryWindowUpdate window ->
             let
                 query =
                     model.query
             in
-                ( { model | isPlanned = False, query = { query | window = window } }, Cmd.none )
+                ( { model | query = { query | window = window }, stats = Nothing }, Cmd.none )
 
         StatsUpdate (Ok stats) ->
-            ( { model | isPlanned = True, stats = stats }, Cmd.none )
+            ( { model | stats = Just stats }, Cmd.none )
 
         StatsUpdate (Err _) ->
             ( model, Cmd.none )
 
+        StreamCancel ->
+            ( { model | streamRunning = False }, streamCancel "" )
+
         StreamComplete _ ->
-            ( model, Cmd.none )
+            ( { model | streamRunning = False }, scroll "" )
 
         StreamError _ ->
-            ( model, Cmd.none )
+            ( { model | streamRunning = False }, Cmd.none )
 
         StreamLines lines ->
             let
@@ -164,27 +189,13 @@ update msg model =
 
                 records =
                     List.map parseRecord lines
-
             in
-                ( { model | records = (model.records ++ records) }, streamContinue "" )
-
-        Tick now ->
-            let
-                timeHasPassed =
-                    (abs (model.lastPlan - now)) >= 100
-
-                termNotEmpty =
-                    model.query.term /= ""
-
-                shouldPlan =
-                    (not model.isPlanned) && timeHasPassed && termNotEmpty
-            in
-                case shouldPlan of
-                    True ->
-                        ( { model | lastPlan = now, now = now }, getStats now model.query )
-
-                    False ->
-                        ( { model | now = now }, Cmd.none )
+                ( { model | records = (model.records ++ records) }
+                , Cmd.batch
+                    [ streamContinue ""
+                    , scroll ""
+                    ]
+                )
 
 
 
@@ -194,21 +205,37 @@ update msg model =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ every (100 * millisecond) Tick
-        , streamComplete StreamComplete
+        [ streamComplete StreamComplete
         , streamError StreamError
         , streamLine StreamLines
         ]
 
 
+
 -- PORTS
 
+
+port scroll : String -> Cmd msg
+
+
+port streamCancel : String -> Cmd msg
+
+
 port streamContinue : String -> Cmd msg
+
+
 port streamRequest : String -> Cmd msg
 
-port streamComplete : ( String -> msg ) -> Sub msg
-port streamError : ( String -> msg ) -> Sub msg
-port streamLine : ( List String -> msg ) -> Sub msg
+
+port streamComplete : (String -> msg) -> Sub msg
+
+
+port streamError : (String -> msg) -> Sub msg
+
+
+port streamLine : (List String -> msg) -> Sub msg
+
+
 
 -- API
 
@@ -223,24 +250,45 @@ queryUrl now query =
             Http.encodeUri (RFC3339.encode (fromTime now))
 
         parts =
-           [ "/store/query?from="
-           , from
-           , "&to="
-           , to
-           , "&q="
-           , query.term
-           ]
-
+            [ "/store/query?from="
+            , from
+            , "&to="
+            , to
+            , "&q="
+            , query.term
+            ]
     in
         if query.regex then
             String.concat (parts ++ [ "&regex" ])
         else
-           String.concat parts
+            String.concat parts
+
+
+streamUrl : Query -> String
+streamUrl query =
+    let
+        parts =
+            [ "/store/stream?"
+            , "&q="
+            , query.term
+            ]
+    in
+        if query.regex then
+            String.concat (parts ++ [ "&regex" ])
+        else
+            String.concat parts
 
 
 getRecords : Time -> Query -> Cmd Msg
 getRecords now query =
-    streamRequest (queryUrl now query)
+    let
+        url =
+            if query.to == "streaming" then
+                streamUrl query
+            else
+                queryUrl now query
+    in
+        streamRequest url
 
 
 getStats : Time -> Query -> Cmd Msg
@@ -294,7 +342,7 @@ extractStatsHeader headers header =
 
 view : Model -> Html Msg
 view model =
-    div [ class "page" ]
+    div [ id "page" ]
         [ nav []
             [ div [ class "container" ]
                 [ formQuery model ]
@@ -304,9 +352,8 @@ view model =
             ]
         , footer []
             [ div [ class "container" ]
-                []
-              --[ viewDebug model
-              --]
+                [ viewDebug model
+                ]
             ]
         ]
 
@@ -315,9 +362,7 @@ viewDebug : Model -> Html Msg
 viewDebug model =
     let
         slimModel =
-            { isPlanned = model.isPlanned
-            , lastPlan = model.lastPlan
-            , now = model.now
+            { now = model.now
             , query = model.query
             , stats = model.stats
             }
@@ -348,31 +393,31 @@ viewMatchList query line indexes elements =
                 viewMatchList query (String.dropLeft (index + queryLen) line) (List.drop 1 indexes) (elements ++ [ nonMatchElement, matchElement ])
 
 
-viewPlan : Bool -> Stats -> Html Msg
-viewPlan isPlanned stats =
-    let
-        nodeText =
-            case stats.nodesQueried of
-                1 ->
-                    "1 node"
+viewPlan : Maybe Stats -> Html Msg
+viewPlan stats =
+    case stats of
+        Nothing ->
+            div [ class "plan" ] [ text "Your query hasn't been planned yet." ]
 
-                _ ->
-                    (toString stats.nodesQueried) ++ " nodes"
+        Just stats ->
+            let
+                nodeText =
+                    case stats.nodesQueried of
+                        1 ->
+                            "1 node"
 
-        segmentsText =
-            case stats.segmentsQueried of
-                1 ->
-                    "1 segment"
+                        _ ->
+                            (toString stats.nodesQueried) ++ " nodes"
 
-                _ ->
-                    (toString stats.segmentsQueried) ++ " segments"
+                segmentsText =
+                    case stats.segmentsQueried of
+                        1 ->
+                            "1 segment"
 
-        elements =
-            case isPlanned of
-                False ->
-                    [ text "Your query hasn't been planned yet." ]
+                        _ ->
+                            (toString stats.segmentsQueried) ++ " segments"
 
-                True ->
+                elements =
                     [ span [] [ text "Your query could return " ]
                     , strong [] [ text (prettyPrintDataSet stats.maxDataSetSize) ]
                     , span [] [ text " reading " ]
@@ -380,8 +425,8 @@ viewPlan isPlanned stats =
                     , span [] [ text " on " ]
                     , strong [] [ text nodeText ]
                     ]
-    in
-        div [ class "plan" ] elements
+            in
+                div [ class "plan" ] elements
 
 
 viewRecord : String -> Int -> Record -> Html Msg
@@ -422,51 +467,70 @@ viewResultInfo numRecords =
 
 formQuery : Model -> Html Msg
 formQuery model =
-    form [ id "query", onSubmit QueryFormSubmit ]
-        [ div [ class "row" ]
-            [ formElementQuery model.query.term
-            ]
-        , div [ class "row" ]
-            [ formElementRange
-            , div [ class "regex" ]
-                [ input [ id "regex", onClick QueryToggleRegex, type_ "checkbox" ] []
-                , label [ for "regex" ] [ text "as regex" ]
+    let
+        attrs =
+            if String.length model.query.term == 0 then
+                [ disabled True ]
+            else
+                []
+
+        action =
+            if model.streamRunning then
+                button [ onClick StreamCancel ] [ text "cancel" ]
+            else if model.query.to == "streaming" then
+                button attrs [ text "stream" ]
+            else
+                button attrs [ text "query" ]
+    in
+        form [ id "query", onSubmit QueryFormSubmit ]
+            [ div [ class "row" ]
+                [ formElementQuery model.query.term
                 ]
-            , button [] [ text "Go" ]
+            , div [ class "actions row" ]
+                [ action
+                , formElementAs
+                , formElementRange model.query
+                ]
+            , div [ class "row" ]
+                [ viewPlan model.stats
+                , viewResultInfo (List.length model.records)
+                ]
             ]
-        , div [ class "row" ]
-            [ viewPlan model.isPlanned model.stats
-            , viewResultInfo (List.length model.records)
+
+
+formElementAs : Html Msg
+formElementAs =
+    div [ class "as" ]
+        [ span [] [ text "as" ]
+        , select [ on "change" (Json.map QueryRegexUpdate targetValue) ]
+            [ option [ value "plain" ] [ text "plain text" ]
+            , option [ value "regex" ] [ text "regex" ]
             ]
         ]
 
 
-formElementRange : Html Msg
-formElementRange =
-    div [ class "range" ]
-        [ formElementWindow
-        , strong [] [ text "-" ]
-        , formElementTo
-        ]
-
-
-formElementWindow : Html Msg
-formElementWindow =
-    select [ on "change" (Json.map QueryWindowUpdate targetValue) ]
-        [ option [ value "5m" ] [ text "5m ago" ]
-        , option [ value "15m" ] [ text "15m ago" ]
-        , option [ value "1h" ] [ text "1 hour ago" ]
-        , option [ value "12h" ] [ text "12 hours ago" ]
-        , option [ value "1d" ] [ text "1 day ago" ]
-        , option [ value "3d" ] [ text "3 days ago" ]
-        , option [ value "7d" ] [ text "7 days ago" ]
-        ]
+formElementRange : Query -> Html Msg
+formElementRange query =
+    let
+        bridge =
+            if query.to == "streaming" then
+                span [] [ text "and" ]
+            else
+                span [] [ text "to" ]
+    in
+        div [ class "range" ]
+            [ span [] [ text "from" ]
+            , formElementWindow
+            , bridge
+            , formElementTo
+            ]
 
 
 formElementTo : Html Msg
 formElementTo =
     select [ on "change" (Json.map QueryToUpdate targetValue) ]
-        [ option [ value "0" ] [ text "now" ]
+        [ option [ value "streaming" ] [ text "streaming" ]
+        , option [ value "0" ] [ text "now" ]
         ]
 
 
@@ -483,6 +547,19 @@ formElementQuery query =
         ]
 
 
+formElementWindow : Html Msg
+formElementWindow =
+    select [ on "change" (Json.map QueryWindowUpdate targetValue) ]
+        [ option [ value "5m" ] [ text "5 min" ]
+        , option [ value "15m" ] [ text "15 min" ]
+        , option [ value "1h" ] [ text "1 hrs" ]
+        , option [ value "12h" ] [ text "12 hrs" ]
+        , option [ value "1d" ] [ text "1 days" ]
+        , option [ value "3d" ] [ text "3 days" ]
+        , option [ value "7d" ] [ text "7 days" ]
+        ]
+
+
 
 -- CONSTANTS
 
@@ -494,12 +571,13 @@ day =
 
 defaultTo : String
 defaultTo =
-    "now"
+    "streaming"
 
 
 defaultWindow : String
 defaultWindow =
     "1h"
+
 
 windowDuration : String -> Time
 windowDuration window =

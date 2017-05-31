@@ -50,6 +50,39 @@ form#query {
 	min-width: 64rem;
 }
 
+form#query button {
+	background: 0;
+	border: 0.1rem solid rgb(44, 62, 80);
+	cursor: pointer;
+	font-weight: 700;
+	margin: -0.1rem;
+	padding: 0 1.7rem;
+	text-transform: capitalize;
+	transition: all 0.15s ease;
+}
+
+form#query button:disabled {
+	border-color: rgb(127, 140, 141);
+	color: rgb(127, 140, 141);
+	cursor: none;
+	pointer-events: none;
+}
+
+form#query button:focus {
+	outline: 0;
+}
+
+form#query button:hover {
+	background: rgb(44, 62, 80);
+	color: rgb(250, 250, 250);
+}
+
+form#query div.plan {
+	color: rgb(127, 140, 141);
+	font-size: 1.4rem;
+	padding: 1.8rem 1.6rem 0.8rem 1.6rem;
+}
+
 form#query div.row {
 	align-items: center;
 	box-sizing: border-box;
@@ -57,6 +90,10 @@ form#query div.row {
 	flex: 1 1 auto;
 	flex-direction: row;
 	flex-wrap: nowrap;
+}
+
+form#query div.row.actions {
+	align-items: stretch;
 }
 
 form#query div.row:last-child {
@@ -72,14 +109,23 @@ form#query div.term {
 	flex: 1 1 auto;
 }
 
+form#query div.as,
 form#query div.range {
 	align-items: center;
 	display: flex;
-	padding: 1.2rem 1.6rem 1rem 1.6rem;
+	padding: 1.2rem 0rem 1rem 1.6rem;
 }
 
-form#query div.regex {
-	margin: 0 1.2rem;
+form#query div.as span,
+form#query div.range span {
+	font-style: italic;
+	font-weight: 300;
+}
+
+form#query div.result-info {
+	font-size: 1.4rem;
+	min-height: 1.6rem;
+	padding: 1.8rem 1.6rem 0.8rem 1.6rem;
 }
 
 form#query input {
@@ -105,34 +151,22 @@ form#query input:-ms-input-placeholder { /* Internet Explorer 10-11 */
 	color: rgb(127, 140, 141);
 }
 
-form#query div.plan {
-	color: rgb(127, 140, 141);
-	font-size: 1.4rem;
-	padding: 1.8rem 1.6rem 0.8rem 1.6rem;
-}
-
-form#query div.result-info {
-	font-size: 1.4rem;
-	min-height: 1.6rem;
-	padding: 1.8rem 1.6rem 0.8rem 1.6rem;
+form#query input#regex {
+	margin-right: 0.6rem;
 }
 
 form#query select {
 	background: transparent;
 	border: 0.1rem solid transparent;
 	border-radius: 0;
+	box-sizing: content-box;
 	cursor: pointer;
 	font-weight: 700;
+	line-height: 1.6em;
+	margin: 0 0 0 1.6rem;
 	outline: 0;
-	padding: 0.8rem 0.4rem 0.8rem 1rem;
-}
-
-form#query select:focus {
-	border-color: rgb(127, 140, 141);
-}
-
-form#query select option {
-	direction: ltr;
+	padding: 0rem 0.3rem;
+	-webkit-appearance: none;
 }
 
 nav {
@@ -143,7 +177,7 @@ nav {
 
 section#result {
 	font-size: 1.6rem;
-	margin-top: 18rem;
+	margin-top: 20rem;
 }
 
 section#result table {

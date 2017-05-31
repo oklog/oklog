@@ -1,6 +1,7 @@
 ; (function() {
 	var app = Elm.Main.fullscreen(),
 		left = "",
+		scroll = false,
 		stream = null;
 
 	var read = function() {
@@ -24,6 +25,26 @@
 			stream = null;
 		});
 	};
+
+	app.ports.scroll.subscribe(function() {
+		if (!scroll) {
+			setTimeout(function() {
+				document.body.scrollTop = document.getElementById('result').scrollHeight;
+				scroll = false;
+			}, 250);
+
+			scroll = true;
+		}
+	});
+
+	app.ports.streamCancel.subscribe(function() {
+		if (!stream) {
+			app.ports.streamError.send("No stream running");
+			return
+		}
+
+		stream.cancel();
+	});
 
 	app.ports.streamContinue.subscribe(function() {
 		if (!stream) {
