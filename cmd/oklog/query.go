@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/pkg/errors"
@@ -37,11 +39,9 @@ func runQuery(args []string) error {
 
 	begin := time.Now()
 
-	verbosePrintf := func(string, ...interface{}) {}
+	stdverbose := ioutil.Discard
 	if *verbose || *stats {
-		verbosePrintf = func(format string, args ...interface{}) {
-			fmt.Fprintf(os.Stderr, format, args...)
-		}
+		stdverbose = os.Stderr
 	}
 
 	_, hostport, _, _, err := parseAddr(*storeAddr, defaultAPIPort)
@@ -101,7 +101,8 @@ func runQuery(args []string) error {
 	if err != nil {
 		return err
 	}
-	verbosePrintf("GET %s\n", req.URL.String())
+
+	fmt.Fprintf(stdverbose, "%s %s\n", method, req.URL.String())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -116,20 +117,24 @@ func runQuery(args []string) error {
 		return errors.Wrap(err, "decoding query result")
 	}
 
-	qtype := "normal string"
+	qtype := "string"
 	if result.Params.Regex {
-		qtype = "regular expression"
+		qtype = "regex"
 	}
 
-	verbosePrintf("Response in %s\n", time.Since(begin))
-	verbosePrintf("Queried from %s\n", result.Params.From)
-	verbosePrintf("Queried to %s\n", result.Params.To)
-	verbosePrintf("Queried %s %q\n", qtype, result.Params.Q)
-	verbosePrintf("%d node(s) queried\n", result.NodesQueried)
-	verbosePrintf("%d segment(s) queried\n", result.SegmentsQueried)
-	verbosePrintf("%dB (%dMiB) maximum data set size\n", result.MaxDataSetSize, result.MaxDataSetSize/(1024*1024))
-	verbosePrintf("%d error(s)\n", result.ErrorCount)
-	verbosePrintf("%s server-reported duration\n", result.Duration)
+	dataSetSize := int64(result.NodesQueried+result.ErrorCount) * result.MaxDataSetSize
+
+	w := tabwriter.NewWriter(stdverbose, 0, 2, 2, ' ', 0)
+	fmt.Fprintf(w, "Response in\t%s\n", time.Since(begin))
+	fmt.Fprintf(w, "Queried from\t%s\n", result.Params.From)
+	fmt.Fprintf(w, "Queried to\t%s\n", result.Params.To)
+	fmt.Fprintf(w, "Queried %s\t%q\n", qtype, result.Params.Q)
+	fmt.Fprintf(w, "Node count\t%d\n", result.NodesQueried)
+	fmt.Fprintf(w, "Segment count\t%d\n", result.SegmentsQueried)
+	fmt.Fprintf(w, "Approx. query set\t%dB (%dMiB)\n", dataSetSize, dataSetSize/(1024*1024))
+	fmt.Fprintf(w, "Error count\t%d\n", result.ErrorCount)
+	fmt.Fprintf(w, "Reported duration\t%s\n", result.Duration)
+	w.Flush()
 
 	switch {
 	case *nocopy:
