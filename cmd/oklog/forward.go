@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	"github.com/oklog/oklog/pkg/forward"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -21,9 +21,11 @@ import (
 func runForward(args []string) error {
 	flagset := flag.NewFlagSet("forward", flag.ExitOnError)
 	var (
-		debug    = flagset.Bool("debug", false, "debug logging")
-		apiAddr  = flagset.String("api", "", "listen address for forward API (and metrics)")
-		prefixes = stringslice{}
+		debug        = flagset.Bool("debug", false, "debug logging")
+		apiAddr      = flagset.String("api", "", "listen address for forward API (and metrics)")
+		prefixes     = stringslice{}
+		backpressure = flagset.String("backpressure", "block", "block, buffer")
+		bufferSize   = flagset.Int("buffer-size", 1024, "in -backpressure=buffer mode, ringbuffer size in records")
 	)
 	flagset.Var(&prefixes, "prefix", "prefix annotated on each log record (repeatable)")
 	flagset.Usage = usageFor(flagset, "oklog forward [flags] <ingester> [<ingester>...]")
@@ -123,115 +125,20 @@ func runForward(args []string) error {
 		urls[i], urls[j] = urls[j], urls[i]
 	}
 
-	// Build a scanner for the input, and the last record we scanned.
-	// These both outlive any individual connection to an ingester.
-	// TODO(pb): have flag for backpressure vs. drop
-	var (
-		s       = bufio.NewScanner(os.Stdin)
-		backoff = time.Duration(0)
-	)
-
-	// Enter the connect and forward loop. We do this forever.
-	for ; ; urls = append(urls[1:], urls[0]) { // rotate thru URLs
-		// We gonna try to connect to this first one.
-		target := urls[0]
-
-		host, port, err := net.SplitHostPort(target.Host)
-		if err != nil {
-			return errors.Wrapf(err, "unexpected error")
-		}
-
-		// Support e.g. "tcp+dnssrv://host:port"
-		fields := strings.SplitN(target.Scheme, "+", 2)
-		if len(fields) == 2 {
-			proto, suffix := fields[0], fields[1]
-			switch suffix {
-			case "dns", "dnsip":
-				ips, err := net.LookupIP(host)
-				if err != nil {
-					level.Warn(logger).Log("LookupIP", host, "err", err)
-					backoff = exponential(backoff)
-					time.Sleep(backoff)
-					continue
-				}
-				host = ips[rand.Intn(len(ips))].String()
-				target.Scheme, target.Host = proto, net.JoinHostPort(host, port)
-
-			case "dnssrv":
-				_, records, err := net.LookupSRV("", proto, host)
-				if err != nil {
-					level.Warn(logger).Log("LookupSRV", host, "err", err)
-					backoff = exponential(backoff)
-					time.Sleep(backoff)
-					continue
-				}
-				host = records[rand.Intn(len(records))].Target
-				target.Scheme, target.Host = proto, net.JoinHostPort(host, port) // TODO(pb): take port from SRV record?
-
-			case "dnsaddr":
-				names, err := net.LookupAddr(host)
-				if err != nil {
-					level.Warn(logger).Log("LookupAddr", host, "err", err)
-					backoff = exponential(backoff)
-					time.Sleep(backoff)
-					continue
-				}
-				host = names[rand.Intn(len(names))]
-				target.Scheme, target.Host = proto, net.JoinHostPort(host, port)
-
-			default:
-				level.Warn(logger).Log("unsupported_scheme_suffix", suffix, "using", proto)
-				target.Scheme = proto // target.Host stays the same
-			}
-		}
-		level.Debug(logger).Log("raw_target", urls[0].String(), "resolved_target", target.String())
-
-		conn, err := net.Dial(target.Scheme, target.Host)
-		if err != nil {
-			level.Warn(logger).Log("Dial", target.String(), "err", err)
-			backoff = exponential(backoff)
-			time.Sleep(backoff)
-			continue
-		}
-
-		ok := s.Scan()
-		for ok {
-			// We enter the loop wanting to write s.Text() to the conn.
-			record := s.Text()
-			if n, err := fmt.Fprintf(conn, "%s%s\n", prefix, record); err != nil {
-				disconnects.Inc()
-				level.Warn(logger).Log("disconnected_from", target.String(), "due_to", err)
-				break
-			} else if n < len(record)+1 {
-				shortWrites.Inc()
-				level.Warn(logger).Log("short_write_to", target.String(), "n", n, "less_than", len(record)+1)
-				break // TODO(pb): we should do something more sophisticated here
-			}
-
-			// Only once the write succeeds do we scan the next record.
-			backoff = 0 // reset the backoff on a successful write
-			forwardBytes.Add(float64(len(record)) + 1)
-			forwardRecords.Inc()
-			ok = s.Scan()
-		}
-		if !ok {
-			level.Info(logger).Log("stdin", "exhausted", "due_to", s.Err())
-			return nil
-		}
+	var f *forward.Forwarder
+	switch strings.ToLower(*backpressure) {
+	case "block":
+		f = forward.NewBlockingForwarder(urls, prefix)
+	case "buffer":
+		f = forward.NewBufferedForwarder(urls, prefix, *bufferSize)
+	default:
+		level.Error(logger).Log("backpressure", backpressure, "err", "invalid backpressure option")
+		os.Exit(1)
 	}
-}
-
-func exponential(d time.Duration) time.Duration {
-	const (
-		min = 16 * time.Millisecond
-		max = 1024 * time.Millisecond
-	)
-	d *= 2
-	if d < min {
-		d = min
-	}
-	if d > max {
-		d = max
-	}
-	return d
+	f.Logger = logger
+	f.Disconnects = disconnects
+	f.ShortWrites = shortWrites
+	f.ForwardBytes = forwardBytes
+	f.ForwardRecords = forwardRecords
+	return f.Forward(os.Stdin)
 }
