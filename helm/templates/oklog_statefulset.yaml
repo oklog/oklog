@@ -65,6 +65,11 @@ spec:
         - name: oklog
           image: {{ .Values.image }}:{{ .Values.imageTag }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
           command:
             - /bin/sh
             - /go/bin/start.sh
