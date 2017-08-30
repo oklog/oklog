@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: oklog
+  name: oklog
+spec:
+  loadBalancerSourceRanges:
+  - 192.168.0.1/32
+  externalTrafficPolicy: Cluster
+  ports:
+  - name: api-80
+    port: 80
+    targetPort: 7650
+    protocol: TCP
+  - name: api-default
+    port: 7650
+    targetPort: 7650
+    protocol: TCP
+  - name: ingest-fast
+    port: 7651
+    targetPort: 7651
+  - name: ingest-durable
+    port: 7652
+    targetPort: 7652
+  - name: ingest-bulk
+    port: 7653
+    targetPort: 7653
+  - name: cluster
+    port: 7659
+    targetPort: 7659
+  selector:
+    app: oklog
+  sessionAffinity: None
+  type: LoadBalancer
