@@ -14,6 +14,7 @@ import (
 	"github.com/go-kit/kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/cors"
 
 	"github.com/oklog/oklog/pkg/cluster"
 	"github.com/oklog/oklog/pkg/fs"
@@ -330,7 +331,7 @@ func runIngest(args []string) error {
 			)))
 			registerMetrics(mux)
 			registerProfile(mux)
-			return http.Serve(apiListener, mux)
+			return http.Serve(apiListener, cors.Default().Handler(mux))
 		}, func(error) {
 			apiListener.Close()
 		})
