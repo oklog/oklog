@@ -1,9 +1,9 @@
-// Package group aliases github.com/oklog/rungroup.
+// Package group aliases github.com/oklog/run.
 package group
 
 import (
-	"github.com/oklog/rungroup"
+	"github.com/oklog/run"
 )
 
-type Group = rungroup.Group
+type Group = run.Group
 
