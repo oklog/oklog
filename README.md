@@ -143,7 +143,7 @@ So, e.g. http://localhost:7650/ui.
 - [Kubernetes](https://github.com/oklog/oklog/wiki/Integrations#kubernetes)
 
 ### Translation
-[[**中文介绍**](https://github.com/1046102779/OKLog) 
+[中文介绍](https://github.com/1046102779/OKLog) 
 ---
 
 [OK icon](https://thenounproject.com/term/like/594444/) by
