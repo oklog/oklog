@@ -293,8 +293,8 @@ func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, 
 			if err != nil {
 				return nil, sz, err
 			}
+			sz += f.Size() // calc size first; below takes ownership of f, and can close
 			rcs = append(rcs, newConcurrentFilteringReadCloser(f, pass, bufsz))
-			sz += f.Size()
 
 		default:
 			// A batch of N requires a K-way merge.
@@ -379,8 +379,8 @@ func makeConcurrentFilteringReadClosers(fs fs.Filesystem, segments []string, pas
 		if err != nil {
 			return rcs, sz, err
 		}
+		sz += f.Size() // calc size first; below takes ownership of f, and can close
 		rcs = append(rcs, newConcurrentFilteringReadCloser(f, pass, bufsz))
-		sz += f.Size()
 	}
 
 	return rcs, sz, nil
