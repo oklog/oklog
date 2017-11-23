@@ -3,11 +3,15 @@ package store
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio"
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
 
@@ -268,16 +272,26 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 // Records are yielded in time order, oldest first, hopefully efficiently!
 // Only records passing the recordFilter are yielded.
 // The sz of the segment files can be used as a proxy for read effort.
-func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, bufsz int64) (rc io.ReadCloser, sz int64, err error) {
+func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, bufsz int64, logger log.Logger) (rc io.ReadCloser, sz int64, err error) {
 	// We will build successive ReadClosers for each batch.
 	var rcs []io.ReadCloser
 
 	// Don't leak FDs on error.
 	defer func() {
 		if err != nil {
-			for _, rc := range rcs {
-				rc.Close()
+			for i, rc := range rcs {
+				if cerr := rc.Close(); cerr != nil {
+					level.Error(logger).Log(
+						"in", "newQueryReadCloser shutdown due to error",
+						"err", err,
+						"fd", fmt.Sprint(i),
+						"of", fmt.Sprint(len(rcs)),
+						"during", "Close",
+						"gave", cerr,
+					)
+				}
 			}
+			rcs = nil
 		}
 	}()
 
@@ -291,6 +305,14 @@ func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, 
 			// A batch of one can be read straight thru.
 			f, err := fs.Open(batch[0])
 			if err != nil {
+				if err == os.ErrNotExist {
+					level.Debug(logger).Log(
+						"file", batch[0],
+						"err", err,
+						"msg", "this can happen if a file is moved away (e.g. compacted) before we can open it",
+					)
+					continue
+				}
 				return nil, sz, err
 			}
 			sz += f.Size() // calc size first; below takes ownership of f, and can close
@@ -298,7 +320,7 @@ func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, 
 
 		default:
 			// A batch of N requires a K-way merge.
-			cfrcs, batchsz, err := makeConcurrentFilteringReadClosers(fs, batch, pass, bufsz)
+			cfrcs, batchsz, err := makeConcurrentFilteringReadClosers(fs, batch, pass, bufsz, logger)
 			if err != nil {
 				return nil, sz, err
 			}
@@ -363,12 +385,21 @@ func batchSegments(segments []string) [][]string {
 	return result
 }
 
-func makeConcurrentFilteringReadClosers(fs fs.Filesystem, segments []string, pass recordFilter, bufsz int64) (rcs []io.ReadCloser, sz int64, err error) {
+func makeConcurrentFilteringReadClosers(fs fs.Filesystem, segments []string, pass recordFilter, bufsz int64, logger log.Logger) (rcs []io.ReadCloser, sz int64, err error) {
 	// Don't leak FDs on error.
 	defer func() {
 		if err != nil {
-			for _, rc := range rcs {
-				rc.Close()
+			for i, rc := range rcs {
+				if cerr := rc.Close(); cerr != nil {
+					level.Error(logger).Log(
+						"in", "makeConcurrentFilteringReadClosers shutdown due to error",
+						"err", err,
+						"fd", fmt.Sprint(i),
+						"of", fmt.Sprint(len(rcs)),
+						"during", "Close",
+						"gave", cerr,
+					)
+				}
 			}
 			rcs = nil
 		}
@@ -377,6 +408,14 @@ func makeConcurrentFilteringReadClosers(fs fs.Filesystem, segments []string, pas
 	for _, segment := range segments {
 		f, err := fs.Open(segment)
 		if err != nil {
+			if err == os.ErrNotExist {
+				level.Debug(logger).Log(
+					"file", segment,
+					"err", err,
+					"msg", "this can happen if a file is moved away (e.g. compacted) before we can open it",
+				)
+				continue
+			}
 			return rcs, sz, err
 		}
 		sz += f.Size() // calc size first; below takes ownership of f, and can close

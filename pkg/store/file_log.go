@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-kit/kit/log"
 	"github.com/oklog/ulid"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
@@ -42,11 +43,12 @@ type fileLog struct {
 	releaser          fs.Releaser // for the LOCK
 	segmentTargetSize int64
 	segmentBufferSize int64
+	logger            log.Logger // I'll take Overloaded Nomenclature for 500, Alex
 }
 
 // NewFileLog returns a Log backed by the filesystem at path root.
 // Note that we don't own segment files! They may disappear.
-func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64) (Log, error) {
+func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64, logger log.Logger) (Log, error) {
 	if err := filesys.MkdirAll(root); err != nil {
 		return nil, errors.Wrapf(err, "creating path %s", root)
 	}
@@ -69,22 +71,23 @@ func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBu
 		releaser:          r,
 		segmentTargetSize: segmentTargetSize,
 		segmentBufferSize: segmentBufferSize,
+		logger:            logger,
 	}, nil
 }
 
-func (log *fileLog) Create() (WriteSegment, error) {
-	filename := filepath.Join(log.root, fmt.Sprintf("%s%s", uuid.New(), extActive))
-	f, err := log.filesys.Create(filename)
+func (fl *fileLog) Create() (WriteSegment, error) {
+	filename := filepath.Join(fl.root, fmt.Sprintf("%s%s", uuid.New(), extActive))
+	f, err := fl.filesys.Create(filename)
 	if err != nil {
 		return nil, err
 	}
-	return &fileWriteSegment{log.filesys, f}, nil
+	return &fileWriteSegment{fl.filesys, f}, nil
 }
 
-func (log *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
+func (fl *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 	var (
 		begin    = time.Now()
-		segments = log.queryMatchingSegments(qp.From.ULID, qp.To.ULID)
+		segments = fl.queryMatchingSegments(qp.From.ULID, qp.To.ULID)
 		pass     = recordFilterBoundedPlain(qp.From.ULID, qp.To.ULID, []byte(qp.Q))
 	)
 	if qp.Regex {
@@ -97,9 +100,9 @@ func (log *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 	}
 
 	// Build the lazy reader.
-	rc, sz, err := newQueryReadCloser(log.filesys, segments, pass, log.segmentBufferSize)
+	rc, sz, err := newQueryReadCloser(fl.filesys, segments, pass, fl.segmentBufferSize, log.With(fl.logger, "subcomponent", "QueryReadCloser"))
 	if err != nil {
-		return QueryResult{}, err
+		return QueryResult{}, errors.Wrap(err, "constructing the lazy reader")
 	}
 	if statsOnly {
 		rc = ioutil.NopCloser(bytes.NewReader(nil))
@@ -118,11 +121,11 @@ func (log *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 	}, nil
 }
 
-func (log *fileLog) Overlapping() ([]ReadSegment, error) {
+func (fl *fileLog) Overlapping() ([]ReadSegment, error) {
 	// We make a simple n-squared algorithm for now.
 	// First, collect all flushed segments.
 	segments := map[string][]string{}
-	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -180,7 +183,7 @@ func (log *fileLog) Overlapping() ([]ReadSegment, error) {
 	// Create ReadSegments.
 	readSegments := make([]ReadSegment, len(candidates))
 	for i, path := range candidates {
-		readSegment, err := newFileReadSegment(log.filesys, path)
+		readSegment, err := newFileReadSegment(fl.filesys, path)
 		if err != nil {
 			return nil, err
 		}
@@ -189,11 +192,11 @@ func (log *fileLog) Overlapping() ([]ReadSegment, error) {
 	return readSegments, nil
 }
 
-func (log *fileLog) Sequential() ([]ReadSegment, error) {
+func (fl *fileLog) Sequential() ([]ReadSegment, error) {
 	// First we need to build an index of all of the segments in time order.
 	// For this we only need the first ULID in the segment.
 	var segmentInfos []segmentInfo
-	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -215,7 +218,7 @@ func (log *fileLog) Sequential() ([]ReadSegment, error) {
 	// We'll walk all the segments and try to get at least 2 that are
 	// small enough to compact together to the given target size.
 	const minimumSegments = 2
-	candidates := chooseFirstSequential(segmentInfos, minimumSegments, log.segmentTargetSize)
+	candidates := chooseFirstSequential(segmentInfos, minimumSegments, fl.segmentTargetSize)
 	if len(candidates) < minimumSegments {
 		return nil, ErrNoSegmentsAvailable // no problem
 	}
@@ -224,7 +227,7 @@ func (log *fileLog) Sequential() ([]ReadSegment, error) {
 	// Create ReadSegments.
 	readSegments := make([]ReadSegment, len(candidates))
 	for i, path := range candidates {
-		readSegment, err := newFileReadSegment(log.filesys, path)
+		readSegment, err := newFileReadSegment(fl.filesys, path)
 		if err != nil {
 			return nil, err
 		}
@@ -233,12 +236,12 @@ func (log *fileLog) Sequential() ([]ReadSegment, error) {
 	return readSegments, nil
 }
 
-func (log *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
+func (fl *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
 	oldestID := ulid.MustNew(ulid.Timestamp(oldestRecord), nil)
 
 	// Get the segments we'll trash.
 	var candidates []string
-	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -265,7 +268,7 @@ func (log *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
 	// We have some candidates. Create and return ReadSegments.
 	readSegments := make([]ReadSegment, len(candidates))
 	for i, path := range candidates {
-		readSegment, err := newFileReadSegment(log.filesys, path)
+		readSegment, err := newFileReadSegment(fl.filesys, path)
 		if err != nil {
 			return nil, err
 		}
@@ -274,10 +277,10 @@ func (log *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
 	return readSegments, nil
 }
 
-func (log *fileLog) Purgeable(oldestModTime time.Time) ([]TrashSegment, error) {
+func (fl *fileLog) Purgeable(oldestModTime time.Time) ([]TrashSegment, error) {
 	// Get the segments we'll remove from the trash.
 	var candidates []string
-	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -299,18 +302,18 @@ func (log *fileLog) Purgeable(oldestModTime time.Time) ([]TrashSegment, error) {
 	// We have some candidates. Create and return TrashSegments.
 	trashSegments := make([]TrashSegment, len(candidates))
 	for i, path := range candidates {
-		f, err := log.filesys.Open(path)
+		f, err := fl.filesys.Open(path)
 		if err != nil {
 			return nil, errors.Wrap(err, "opening candidate segment for read")
 		}
-		trashSegments[i] = fileTrashSegment{log.filesys, f}
+		trashSegments[i] = fileTrashSegment{fl.filesys, f}
 	}
 	return trashSegments, nil
 }
 
-func (log *fileLog) Stats() (LogStats, error) {
+func (fl *fileLog) Stats() (LogStats, error) {
 	var stats LogStats
-	filepath.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -336,8 +339,8 @@ func (log *fileLog) Stats() (LogStats, error) {
 	return stats, nil
 }
 
-func (log *fileLog) Close() error {
-	return log.releaser.Release()
+func (fl *fileLog) Close() error {
+	return fl.releaser.Release()
 }
 
 func recoverSegments(filesys fs.Filesystem, root string) error {
@@ -409,8 +412,8 @@ func recordFilterBoundedRegex(from, to ulid.ULID, q *regexp.Regexp) recordFilter
 
 // queryMatchingSegments returns a sorted slice of all segment files
 // that could possibly have records in the provided time range.
-func (log *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []string) {
-	log.filesys.Walk(log.root, func(path string, info os.FileInfo, err error) error {
+func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []string) {
+	fl.filesys.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}

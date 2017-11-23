@@ -200,8 +200,10 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 	var readClosers []io.ReadCloser
 	defer func() {
 		// Don't leak if we need to make an early return.
-		for _, rc := range readClosers {
-			rc.Close()
+		for i, rc := range readClosers {
+			if err := rc.Close(); err != nil {
+				level.Error(a.logger).Log("rc", i, "of", len(readClosers), "during", "Close", "err", err)
+			}
 		}
 	}()
 
