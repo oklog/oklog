@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/go-kit/kit/log"
 	"github.com/oklog/oklog/pkg/fs"
 )
 
@@ -86,7 +87,7 @@ func TestRecoverSegments(t *testing.T) {
 		segmentTargetSize = 10 * 1024
 		segmentBufferSize = 1024
 	)
-	filelog, err := NewFileLog(filesys, "", segmentTargetSize, segmentBufferSize)
+	filelog, err := NewFileLog(filesys, "", segmentTargetSize, segmentBufferSize, log.NewNopLogger())
 	if err != nil {
 		t.Fatalf("NewFileLog: %v", err)
 	}
@@ -143,13 +144,13 @@ func TestLockBehavior(t *testing.T) {
 			f.Close()
 
 			// NewFileLog should manage this fine.
-			filelog, err := NewFileLog(filesys, root, 1024, 1024)
+			filelog, err := NewFileLog(filesys, root, 1024, 1024, log.NewNopLogger())
 			if err != nil {
 				t.Fatalf("initial NewFileLog: %v", err)
 			}
 
 			// But a second FileLog should fail.
-			if _, err := NewFileLog(filesys, root, 1024, 1024); err == nil {
+			if _, err := NewFileLog(filesys, root, 1024, 1024, log.NewNopLogger()); err == nil {
 				t.Fatalf("second NewFileLog: want error, have none")
 			} else {
 				t.Logf("second NewFileLog: got expected error: %v", err)

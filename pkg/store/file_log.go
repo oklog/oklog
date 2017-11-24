@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
@@ -410,9 +411,10 @@ func recordFilterBoundedRegex(from, to ulid.ULID, q *regexp.Regexp) recordFilter
 	}
 }
 
-// queryMatchingSegments returns a sorted slice of all segment files
-// that could possibly have records in the provided time range.
-func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []string) {
+// queryMatchingSegments returns a sorted slice of all segment files that could
+// possibly have records in the provided time range. The caller is responsible
+// for closing the segments.
+func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []readSegment) {
 	fl.filesys.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -427,18 +429,28 @@ func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []string)
 		}
 		fields := strings.SplitN(basename(path), "-", 2)
 		if len(fields) != 2 {
+			level.Error(fl.logger).Log("file", path, "err", "unexpected file name; ignoring")
 			return nil // weird; skip
 		}
 		low := ulid.MustParse(fields[0])
 		high := ulid.MustParse(fields[1])
-		if overlap(from, to, low, high) {
-			segments = append(segments, path)
+		if !overlap(from, to, low, high) {
+			return nil
+		}
+		file, err := fl.filesys.Open(path)
+		switch err {
+		case nil:
+			segments = append(segments, readSegment{path, file, info.Size()})
+		case os.ErrNotExist:
+			level.Warn(fl.logger).Log("file", path, "err", err, "msg", "this can happen due to e.g. compaction")
+		default:
+			level.Error(fl.logger).Log("file", path, "err", err)
 		}
 		return nil
 	})
 	sort.Slice(segments, func(i, j int) bool {
-		a := strings.SplitN(basename(segments[i]), "-", 2)[0]
-		b := strings.SplitN(basename(segments[j]), "-", 2)[0]
+		a := strings.SplitN(basename(segments[i].path), "-", 2)[0]
+		b := strings.SplitN(basename(segments[j].path), "-", 2)[0]
 		return a < b
 	})
 	return segments

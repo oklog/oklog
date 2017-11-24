@@ -96,9 +96,16 @@ var (
 )
 
 func newFixtureAPI(t *testing.T) (*API, error) {
+	// Loggers.
+	var (
+		baseLogger = log.NewLogfmtLogger(os.Stderr)
+		logLogger  = log.With(baseLogger, "component", "FileLog")
+		apiLogger  = log.With(baseLogger, "component", "API")
+	)
+
 	// Construct a virtual file log.
 	filesys := fs.NewVirtualFilesystem()
-	filelog, err := NewFileLog(filesys, "/", 10240, 1024)
+	filelog, err := NewFileLog(filesys, "/", 10240, 1024, logLogger)
 	if err != nil {
 		return nil, err
 	}
@@ -111,8 +118,7 @@ func newFixtureAPI(t *testing.T) (*API, error) {
 		replicatedSegments = prometheus.NewCounter(prometheus.CounterOpts{})
 		replicatedBytes    = prometheus.NewCounter(prometheus.CounterOpts{})
 		duration           = prometheus.NewHistogramVec(prometheus.HistogramOpts{}, []string{"method", "path", "status_code"})
-		logger             = log.NewLogfmtLogger(os.Stderr)
-		a                  = NewAPI(peer, filelog, queryClient, streamClient, replicatedSegments, replicatedBytes, duration, logger)
+		a                  = NewAPI(peer, filelog, queryClient, streamClient, replicatedSegments, replicatedBytes, duration, apiLogger)
 	)
 
 	// Populate the store via the replicate API.
@@ -125,6 +131,12 @@ func newFixtureAPI(t *testing.T) (*API, error) {
 			return nil, fmt.Errorf("Replicate %d failed: HTTP %d (%s)", i, w.Code, strings.TrimSpace(w.Body.String()))
 		}
 	}
+
+	// Debug: dump the filesys.
+	filesys.Walk("/", func(path string, info os.FileInfo, err error) error {
+		t.Logf("### Walk: %s (%dB)", path, info.Size())
+		return nil
+	})
 
 	// Return the populated API.
 	return a, nil
