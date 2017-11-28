@@ -1,10 +1,15 @@
 package store
 
 import (
+	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/oklog/ulid"
 
 	"github.com/go-kit/kit/log"
 	"github.com/oklog/oklog/pkg/fs"
@@ -157,5 +162,46 @@ func TestLockBehavior(t *testing.T) {
 			}
 			filelog.Close()
 		})
+	}
+}
+
+func TestBadSegment(t *testing.T) {
+	t.Parallel()
+
+	// Create some filenames.
+	var (
+		t0        = time.Now().Add(-time.Minute)
+		entropy   = rand.New(rand.NewSource(7))
+		mktime    = func(i int) time.Time { return t0.Add(time.Duration(i) * time.Second) }
+		mkulid    = func(i int) ulid.ULID { return ulid.MustNew(ulid.Timestamp(mktime(i)), entropy) }
+		mkulidstr = func(i int) string { return mkulid(i).String() }
+		goodfile1 = fmt.Sprintf("%s-%s%s", mkulidstr(0), mkulidstr(3), extFlushed)
+		goodfile2 = fmt.Sprintf("%s-%s%s", mkulidstr(1), mkulidstr(5), extFlushed)
+		badfile   = fmt.Sprintf("%s-%s%s", mkulidstr(2), "xxx", extFlushed)
+	)
+
+	// Populate a filesys with those files.
+	filesys := fs.NewVirtualFilesystem()
+	for _, filename := range []string{goodfile1, goodfile2, badfile} {
+		f, _ := filesys.Create("/" + filename)
+		f.Close()
+	}
+
+	// Create a filelog around that filesys.
+	filelog, _ := NewFileLog(filesys, "/", 1024, 1024, log.NewLogfmtLogger(os.Stderr))
+
+	// Perform some read op on the filelog, to trigger rm.
+	// Main thing here is just that it doesn't panic.
+	filelog.Overlapping()
+
+	// Hopefully we've eliminated the bad file.
+	// TODO(pb): in the future, write some valid entries and test they're recovered somewhere
+	found := map[string]bool{}
+	filesys.Walk("/", func(path string, info os.FileInfo, err error) error {
+		found[filepath.Base(path)] = true
+		return nil
+	})
+	if _, ok := found[badfile]; ok {
+		t.Fatalf("%s wasn't deleted", badfile)
 	}
 }

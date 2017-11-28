@@ -126,7 +126,7 @@ func (fl *fileLog) Overlapping() ([]ReadSegment, error) {
 	// We make a simple n-squared algorithm for now.
 	// First, collect all flushed segments.
 	segments := map[string][]string{}
-	filepath.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
+	fl.filesys.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -136,6 +136,23 @@ func (fl *fileLog) Overlapping() ([]ReadSegment, error) {
 		if filepath.Ext(path) != extFlushed {
 			return nil // skip
 		}
+		if _, _, err := parseFilename(path); err != nil {
+			level.Error(fl.logger).Log(
+				"file", path,
+				"err", err,
+				"size", info.Size(),
+				"msg", "will remove apparently bad data file",
+			)
+			// TODO(pb): re-parse and recover this file, async
+			if err := fl.filesys.Remove(path); err != nil {
+				level.Error(fl.logger).Log(
+					"file", path,
+					"err", err,
+					"msg", "tried to remove bad data file, which failed",
+				)
+			}
+			return nil // weird; ignore
+		}
 		segments[path] = nil
 		return nil
 	})
@@ -143,22 +160,18 @@ func (fl *fileLog) Overlapping() ([]ReadSegment, error) {
 	// Then, for each segment, compare against all other segments.
 	// Record all segments which overlap.
 	for path := range segments {
-		fields := strings.SplitN(basename(path), "-", 2)
-		if len(fields) != 2 {
-			continue // weird; skip
+		a, b, err := parseFilename(path) // TODO(pb): maybe eliminate double work
+		if err != nil {
+			panic(fmt.Errorf("failed to parse a filename that must have successfully parsed previously: %v", err))
 		}
-		a := ulid.MustParse(fields[0])
-		b := ulid.MustParse(fields[1])
 		for compare := range segments {
 			if path == compare {
 				continue // we will overlap with ourselves, natch
 			}
-			fields = strings.SplitN(basename(compare), "-", 2)
-			if len(fields) != 2 {
-				continue // weird; skip
+			c, d, err := parseFilename(compare)
+			if err != nil {
+				panic(fmt.Errorf("failed to parse a filename that must have successfully parsed previously: %v", err))
 			}
-			c := ulid.MustParse(fields[0])
-			d := ulid.MustParse(fields[1])
 			if overlap(a, b, c, d) {
 				segments[path] = append(segments[path], compare)
 			}
@@ -197,7 +210,7 @@ func (fl *fileLog) Sequential() ([]ReadSegment, error) {
 	// First we need to build an index of all of the segments in time order.
 	// For this we only need the first ULID in the segment.
 	var segmentInfos []segmentInfo
-	filepath.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
+	fl.filesys.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -207,11 +220,20 @@ func (fl *fileLog) Sequential() ([]ReadSegment, error) {
 		if filepath.Ext(path) != extFlushed {
 			return nil // skip
 		}
-		fields := strings.SplitN(basename(path), "-", 2)
-		if len(fields) != 2 {
+		a, _, err := parseFilename(path)
+		if err != nil {
+			level.Warn(fl.logger).Log("method", "Sequential", "file", path, "err", err)
+			// TODO(pb): re-parse and recover this file, async
+			if err := fl.filesys.Remove(path); err != nil {
+				level.Error(fl.logger).Log(
+					"file", path,
+					"err", err,
+					"msg", "tried to remove bad data file, which failed",
+				)
+			}
 			return nil // weird; skip
 		}
-		segmentInfos = append(segmentInfos, segmentInfo{fields[0], path, info.Size()})
+		segmentInfos = append(segmentInfos, segmentInfo{a.String(), path, info.Size()})
 		return nil
 	})
 	sort.Slice(segmentInfos, func(i, j int) bool { return segmentInfos[i].lowID < segmentInfos[j].lowID })
@@ -242,7 +264,7 @@ func (fl *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
 
 	// Get the segments we'll trash.
 	var candidates []string
-	filepath.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
+	fl.filesys.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -252,11 +274,19 @@ func (fl *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
 		if filepath.Ext(path) != extFlushed {
 			return nil // skip
 		}
-		fields := strings.SplitN(basename(path), "-", 2)
-		if len(fields) != 2 {
+		_, high, err := parseFilename(path)
+		if err != nil {
+			level.Warn(fl.logger).Log("during", "Trashable", "file", path, "err", err)
+			// TODO(pb): re-parse and recover this file, async
+			if err := fl.filesys.Remove(path); err != nil {
+				level.Error(fl.logger).Log(
+					"file", path,
+					"err", err,
+					"msg", "tried to remove bad data file, which failed",
+				)
+			}
 			return nil // weird; skip
 		}
-		high := ulid.MustParse(fields[1])
 		if bytes.Compare(high[:], oldestID[:]) < 0 {
 			candidates = append(candidates, path)
 		}
@@ -281,7 +311,7 @@ func (fl *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
 func (fl *fileLog) Purgeable(oldestModTime time.Time) ([]TrashSegment, error) {
 	// Get the segments we'll remove from the trash.
 	var candidates []string
-	filepath.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
+	fl.filesys.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -314,7 +344,7 @@ func (fl *fileLog) Purgeable(oldestModTime time.Time) ([]TrashSegment, error) {
 
 func (fl *fileLog) Stats() (LogStats, error) {
 	var stats LogStats
-	filepath.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
+	fl.filesys.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -427,13 +457,19 @@ func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []readSeg
 		if ext := filepath.Ext(path); !(ext == extFlushed || ext == extReading) {
 			return nil // skip
 		}
-		fields := strings.SplitN(basename(path), "-", 2)
-		if len(fields) != 2 {
-			level.Error(fl.logger).Log("file", path, "err", "unexpected file name; ignoring")
+		low, high, err := parseFilename(path)
+		if err != nil {
+			level.Error(fl.logger).Log("during", "queryMatchingSegments", "file", path, "err", err)
+			// TODO(pb): re-parse and recover this file, async
+			if err := fl.filesys.Remove(path); err != nil {
+				level.Error(fl.logger).Log(
+					"file", path,
+					"err", err,
+					"msg", "tried to remove bad data file, which failed",
+				)
+			}
 			return nil // weird; skip
 		}
-		low := ulid.MustParse(fields[0])
-		high := ulid.MustParse(fields[1])
 		if !overlap(from, to, low, high) {
 			return nil
 		}
@@ -598,4 +634,29 @@ func basename(path string) string {
 
 func modifyExtension(filename, newExt string) string {
 	return filename[:len(filename)-len(filepath.Ext(filename))] + newExt
+}
+
+func parseFilename(filename string) (a, b ulid.ULID, err error) {
+	fields := strings.SplitN(basename(filename), "-", 2)
+	if len(fields) != 2 {
+		return a, b, segmentParseError{filename, fmt.Errorf("invalid filename, not enough fields")}
+	}
+	a, err = ulid.Parse(fields[0])
+	if err != nil {
+		return a, b, segmentParseError{filename, fmt.Errorf("failed to parse first ULID: %v", err)}
+	}
+	b, err = ulid.Parse(fields[1])
+	if err != nil {
+		return a, b, segmentParseError{filename, fmt.Errorf("failed to parse second ULID: %v", err)}
+	}
+	return a, b, nil
+}
+
+type segmentParseError struct {
+	Filename string
+	Err      error
+}
+
+func (e segmentParseError) Error() string {
+	return fmt.Sprintf("%s: %v", e.Filename, e.Err)
 }
