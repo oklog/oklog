@@ -201,8 +201,8 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 		for i, rc := range rcs {
 			if err := rc.Close(); err != nil {
 				a.reporter.ReportEvent(Event{
-					Op: "handleUserQuery", File: fmt.Sprintf("%d/%d", i+1, len(rcs)), Err: err,
-					Msg: "Close of intermediate io.ReadCloser failed",
+					Op: "handleUserQuery", Error: err,
+					Msg: fmt.Sprintf("Close of intermediate io.ReadCloser %d/%d failed", i+1, len(rcs)),
 				})
 			}
 		}
@@ -217,7 +217,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 		// Direct error, network problem?
 		if response.err != nil {
 			a.reporter.ReportEvent(Event{
-				Op: "handleUserQuery", Err: response.err,
+				Op: "handleUserQuery", Error: response.err,
 				Msg: fmt.Sprintf("gather query response from store %d/%d: total failure", i+1, len(responses)),
 			})
 			qr.ErrorCount++
@@ -235,7 +235,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 			}
 			response.resp.Body.Close()
 			a.reporter.ReportEvent(Event{
-				Op: "handleUserQuery", Err: fmt.Errorf(response.resp.Status),
+				Op: "handleUserQuery", Error: fmt.Errorf(response.resp.Status),
 				Msg: fmt.Sprintf("gather query response from store %d/%d: bad status (%s)", i+1, len(responses), strings.TrimSpace(string(buf))),
 			})
 			qr.ErrorCount++
@@ -258,7 +258,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 		if err := partialResult.DecodeFrom(response.resp); err != nil {
 			err = errors.Wrap(err, "decoding partial result")
 			a.reporter.ReportEvent(Event{
-				Op: "handleUserQuery", Err: err,
+				Op: "handleUserQuery", Error: err,
 				Msg: fmt.Sprintf("gather query response from store %d/%d: invalid response", i+1, len(responses)),
 			})
 			qr.ErrorCount++

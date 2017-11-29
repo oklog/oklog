@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/oklog/oklog/pkg/cluster"
@@ -38,7 +36,7 @@ type Consumer struct {
 	consumedBytes      prometheus.Counter
 	replicatedSegments prometheus.Counter
 	replicatedBytes    prometheus.Counter
-	logger             log.Logger
+	reporter           EventReporter
 }
 
 // NewConsumer creates a consumer.
@@ -51,7 +49,7 @@ func NewConsumer(
 	replicationFactor int,
 	consumedSegments, consumedBytes prometheus.Counter,
 	replicatedSegments, replicatedBytes prometheus.Counter,
-	logger log.Logger,
+	reporter EventReporter,
 ) *Consumer {
 	return &Consumer{
 		peer:               peer,
@@ -68,7 +66,7 @@ func NewConsumer(
 		consumedBytes:      consumedBytes,
 		replicatedSegments: replicatedSegments,
 		replicatedBytes:    replicatedBytes,
-		logger:             logger,
+		reporter:           reporter,
 	}
 }
 
@@ -101,11 +99,6 @@ func (c *Consumer) Stop() {
 type stateFn func() stateFn
 
 func (c *Consumer) gather() stateFn {
-	var (
-		base = log.With(c.logger, "state", "gather")
-		warn = level.Warn(base)
-	)
-
 	// A naïve way to break out of the gather loop in atypical conditions.
 	// TODO(pb): this obviously needs more thought and consideration
 	instances := c.peer.Current(cluster.PeerTypeIngest)
@@ -126,7 +119,9 @@ func (c *Consumer) gather() stateFn {
 	if want, have := c.replicationFactor, len(c.peer.Current(cluster.PeerTypeStore)); have < want {
 		// Don't gather if we can't replicate.
 		// Better to queue up on the ingesters.
-		warn.Log("replication_factor", want, "available_peers", have, "err", "replication currently impossible")
+		c.reporter.ReportEvent(Event{
+			Op: "gather", Warning: fmt.Errorf("replication factor %d, available peers %d: replication currently impossible", want, have),
+		})
 		time.Sleep(time.Second)
 		c.gatherErrors++
 		return c.gather
@@ -145,14 +140,20 @@ func (c *Consumer) gather() stateFn {
 	instance := instances[rand.Intn(len(instances))]
 	nextResp, err := c.client.Get(fmt.Sprintf("http://%s/ingest%s", instance, ingest.APIPathNext))
 	if err != nil {
-		warn.Log("ingester", instance, "during", ingest.APIPathNext, "err", err)
+		c.reporter.ReportEvent(Event{
+			Op: "gather", Warning: err,
+			Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, ingest.APIPathNext),
+		})
 		c.gatherErrors++
 		return c.gather
 	}
 	defer nextResp.Body.Close()
 	nextRespBody, err := ioutil.ReadAll(nextResp.Body)
 	if err != nil {
-		warn.Log("ingester", instance, "during", ingest.APIPathNext, "err", err)
+		c.reporter.ReportEvent(Event{
+			Op: "gather", Warning: err,
+			Msg: fmt.Sprintf("ingester %s, during %s: read error", instance, ingest.APIPathNext),
+		})
 		c.gatherErrors++
 		return c.gather
 	}
@@ -163,7 +164,10 @@ func (c *Consumer) gather() stateFn {
 		return c.gather
 	}
 	if nextResp.StatusCode != http.StatusOK {
-		warn.Log("ingester", instance, "during", ingest.APIPathNext, "returned", nextResp.Status)
+		c.reporter.ReportEvent(Event{
+			Op: "gather", Warning: fmt.Errorf(nextResp.Status),
+			Msg: fmt.Sprintf("ingester %s, during %s: bad response code", instance, ingest.APIPathNext),
+		})
 		c.gatherErrors++
 		return c.gather
 	}
@@ -179,13 +183,19 @@ func (c *Consumer) gather() stateFn {
 		// Reading failed, so we can't possibly commit the segment.
 		// The simplest thing to do now is to fail everything.
 		// TODO(pb): this could be improved i.e. made more granular
-		warn.Log("ingester", instance, "during", ingest.APIPathRead, "err", err)
+		c.reporter.ReportEvent(Event{
+			Op: "gather", Error: err,
+			Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, ingest.APIPathRead),
+		})
 		c.gatherErrors++
 		return c.fail // fail everything
 	}
 	defer readResp.Body.Close()
 	if readResp.StatusCode != http.StatusOK {
-		warn.Log("ingester", instance, "during", ingest.APIPathRead, "returned", readResp.Status)
+		c.reporter.ReportEvent(Event{
+			Op: "gather", Error: fmt.Errorf(readResp.Status),
+			Msg: fmt.Sprintf("ingester %s, during %s: bad response code", instance, ingest.APIPathRead),
+		})
 		c.gatherErrors++
 		return c.fail // fail everything, same as above
 	}
@@ -193,7 +203,10 @@ func (c *Consumer) gather() stateFn {
 	// Merge the segment into our active segment.
 	var cw countingWriter
 	if _, _, _, err := mergeRecords(c.active, io.TeeReader(readResp.Body, &cw)); err != nil {
-		warn.Log("ingester", instance, "during", "mergeRecords", "err", err)
+		c.reporter.ReportEvent(Event{
+			Op: "gather", Error: err,
+			Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, "mergeRecords"),
+		})
 		c.gatherErrors++
 		return c.fail // fail everything, same as above
 	}
@@ -208,11 +221,6 @@ func (c *Consumer) gather() stateFn {
 }
 
 func (c *Consumer) replicate() stateFn {
-	var (
-		base = log.With(c.logger, "state", "replicate")
-		warn = level.Warn(base)
-	)
-
 	// Replicate the segment to the cluster.
 	var (
 		peers      = c.peer.Current(cluster.PeerTypeStore)
@@ -220,7 +228,9 @@ func (c *Consumer) replicate() stateFn {
 		replicated = 0
 	)
 	if want, have := c.replicationFactor, len(peers); have < want {
-		warn.Log("replication_factor", want, "available_peers", have, "err", "replication currently impossible")
+		c.reporter.ReportEvent(Event{
+			Op: "replicate", Warning: fmt.Errorf("replication factor %d, available peers %d: replication currently impossible", want, have),
+		})
 		return c.fail // can't do anything here
 	}
 	for i := 0; i < len(indices) && replicated < c.replicationFactor; i++ {
@@ -233,18 +243,26 @@ func (c *Consumer) replicate() stateFn {
 		)
 		resp, err := c.client.Post(uri, bodyType, body)
 		if err != nil {
-			warn.Log("target", target, "during", APIPathReplicate, "err", err)
+			c.reporter.ReportEvent(Event{
+				Op: "replicate", Error: err,
+				Msg: fmt.Sprintf("target %s, during %s: fatal error", target, APIPathReplicate),
+			})
 			continue // we'll try another one
 		}
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			warn.Log("target", target, "during", APIPathReplicate, "got", resp.Status)
+			c.reporter.ReportEvent(Event{
+				Op: "replicate", Error: fmt.Errorf(resp.Status),
+				Msg: fmt.Sprintf("target %s, during %s: bad status code", target, APIPathReplicate),
+			})
 			continue // we'll try another one
 		}
 		replicated++
 	}
 	if replicated < c.replicationFactor {
-		warn.Log("err", "failed to fully replicate", "want", c.replicationFactor, "have", replicated)
+		c.reporter.ReportEvent(Event{
+			Op: "replicate", Error: fmt.Errorf("failed to fully replicate: want %d, have %d", c.replicationFactor, replicated),
+		})
 		return c.fail // harsh, but OK
 	}
 
@@ -263,11 +281,6 @@ func (c *Consumer) fail() stateFn {
 }
 
 func (c *Consumer) resetVia(commitOrFailed string) stateFn {
-	var (
-		base = log.With(c.logger, "state", commitOrFailed)
-		warn = level.Warn(base)
-	)
-
 	// If commits fail, the segment may be re-replicated; that's OK.
 	// If fails fail, the segment will eventually time-out; that's also OK.
 	// So we have best-effort semantics, just log the error and move on.
@@ -280,12 +293,18 @@ func (c *Consumer) resetVia(commitOrFailed string) stateFn {
 				uri := fmt.Sprintf("http://%s/ingest/%s?id=%s", instance, commitOrFailed, id)
 				resp, err := c.client.Post(uri, "text/plain", nil)
 				if err != nil {
-					warn.Log("instance", instance, "during", "POST", "uri", uri, "err", err)
+					c.reporter.ReportEvent(Event{
+						Op: commitOrFailed, Error: err,
+						Msg: fmt.Sprintf("instance %s, during %s: fatal error", instance, "POST"),
+					})
 					return
 				}
 				resp.Body.Close()
 				if resp.StatusCode != http.StatusOK {
-					warn.Log("instance", instance, "during", "POST", "uri", uri, "status", resp.Status)
+					c.reporter.ReportEvent(Event{
+						Op: commitOrFailed, Error: fmt.Errorf(resp.Status),
+						Msg: fmt.Sprintf("instance %s, during %s: bad status code", instance, "POST"),
+					})
 					return
 				}
 			}(instance, id)

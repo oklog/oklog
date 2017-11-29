@@ -7,11 +7,12 @@ import (
 
 // Event is emitted by store components, typically when things go wrong.
 type Event struct {
-	Debug bool
-	Op    string
-	File  string
-	Err   error
-	Msg   string
+	Debug   bool
+	Op      string
+	File    string
+	Error   error
+	Warning error
+	Msg     string
 }
 
 // EventReporter can receive (and, presumably, do something with) Events.
@@ -30,7 +31,7 @@ func (r LogReporter) ReportEvent(e Event) {
 		e.Op = "undefined"
 	}
 	var (
-		levelFunc = level.Warn
+		levelFunc = level.Info
 		keyvals   = []interface{}{"op", e.Op}
 	)
 	if e.Debug {
@@ -39,9 +40,13 @@ func (r LogReporter) ReportEvent(e Event) {
 	if e.File != "" {
 		keyvals = append(keyvals, "file", e.File)
 	}
-	if e.Err != nil {
+	if e.Warning != nil {
+		levelFunc = level.Warn
+		keyvals = append(keyvals, "warning", e.Warning)
+	}
+	if e.Error != nil {
 		levelFunc = level.Error
-		keyvals = append(keyvals, "err", e.Err)
+		keyvals = append(keyvals, "error", e.Error)
 	}
 	if e.Msg != "" {
 		keyvals = append(keyvals, "msg", e.Msg)

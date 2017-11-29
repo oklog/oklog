@@ -98,7 +98,7 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 	}
 	if err != nil {
 		c.reporter.ReportEvent(Event{
-			Op: "compact", Err: err,
+			Op: "compact", Error: err,
 			Msg: fmt.Sprintf("compact %s failed during getSegments", kind),
 		})
 		return 0, "Error"
@@ -109,7 +109,7 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 			if err := readSegment.Reset(); err != nil {
 				// We can't do anything but log the error.
 				c.reporter.ReportEvent(Event{
-					Op: "compact", Err: err,
+					Op: "compact", Error: err,
 					Msg: fmt.Sprintf("compact %s failed to Reset a read segment", kind),
 				})
 			}
@@ -125,7 +125,7 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 	}
 	if _, err := mergeRecordsToLog(c.log, c.segmentTargetSize, readers...); err != nil {
 		c.reporter.ReportEvent(Event{
-			Op: "compact", Err: err,
+			Op: "compact", Error: err,
 			Msg: fmt.Sprintf("compact %s failed during mergeRecordsToLog", kind),
 		})
 		return 0, "Error"
@@ -139,7 +139,7 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 		// compacter.
 		if err := readSegment.Purge(); err != nil {
 			c.reporter.ReportEvent(Event{
-				Op: "compact", Err: err,
+				Op: "compact", Warning: err,
 				Msg: fmt.Sprintf("compact %s failed to Purge a read segment, which is not critical", kind),
 			})
 		}
@@ -159,7 +159,7 @@ func (c *Compacter) moveToTrash() {
 	}
 	if err != nil {
 		c.reporter.ReportEvent(Event{
-			Op: "moveToTrash", Err: err,
+			Op: "moveToTrash", Error: err,
 			Msg: "fetching Trashable read segments failed",
 		})
 		return
@@ -168,7 +168,7 @@ func (c *Compacter) moveToTrash() {
 		if err := segment.Trash(); err != nil {
 			// We can't do anything but log the error.
 			c.reporter.ReportEvent(Event{
-				Op: "moveToTrash", Err: err,
+				Op: "moveToTrash", Error: err,
 				Msg: "Trashing a read segment failed",
 			})
 		}
@@ -183,7 +183,7 @@ func (c *Compacter) emptyTrash() {
 	}
 	if err != nil {
 		c.reporter.ReportEvent(Event{
-			Op: "emptyTrash", Err: err,
+			Op: "emptyTrash", Error: err,
 			Msg: "fetching Purgeable segments failed",
 		})
 		return
@@ -192,7 +192,7 @@ func (c *Compacter) emptyTrash() {
 		if err := segment.Purge(); err != nil {
 			// We can't do anything but log the error.
 			c.reporter.ReportEvent(Event{
-				Op: "emptyTrash", Err: err,
+				Op: "emptyTrash", Error: err,
 				Msg: "Purging a read segment failed",
 			})
 		}
