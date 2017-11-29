@@ -100,7 +100,7 @@ func newFixtureAPI(t *testing.T) (*API, error) {
 	var (
 		baseLogger  = log.NewLogfmtLogger(os.Stderr)
 		logReporter = LogReporter{log.With(baseLogger, "component", "FileLog")}
-		apiLogger   = log.With(baseLogger, "component", "API")
+		apiReporter = LogReporter{log.With(baseLogger, "component", "API")}
 	)
 
 	// Construct a virtual file log.
@@ -118,7 +118,7 @@ func newFixtureAPI(t *testing.T) (*API, error) {
 		replicatedSegments = prometheus.NewCounter(prometheus.CounterOpts{})
 		replicatedBytes    = prometheus.NewCounter(prometheus.CounterOpts{})
 		duration           = prometheus.NewHistogramVec(prometheus.HistogramOpts{}, []string{"method", "path", "status_code"})
-		a                  = NewAPI(peer, filelog, queryClient, streamClient, replicatedSegments, replicatedBytes, duration, apiLogger)
+		a                  = NewAPI(peer, filelog, queryClient, streamClient, replicatedSegments, replicatedBytes, duration, apiReporter)
 	)
 
 	// Populate the store via the replicate API.

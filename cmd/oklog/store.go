@@ -195,8 +195,12 @@ func runStore(args []string) error {
 	default:
 		return errors.Errorf("invalid -filesystem %q", *filesystem)
 	}
-	storeReporter := store.LogReporter{Logger: log.With(logger, "component", "FileLog")}
-	storeLog, err := store.NewFileLog(fsys, *storePath, *segmentTargetSize, *segmentBufferSize, storeReporter)
+	storeLog, err := store.NewFileLog(
+		fsys,
+		*storePath,
+		*segmentTargetSize, *segmentBufferSize,
+		store.LogReporter{Logger: log.With(logger, "component", "FileLog")},
+	)
 	if err != nil {
 		return err
 	}
@@ -300,7 +304,7 @@ func runStore(args []string) error {
 				replicatedSegments.WithLabelValues("ingress"),
 				replicatedBytes.WithLabelValues("ingress"),
 				apiDuration,
-				logger,
+				store.LogReporter{Logger: log.With(logger, "component", "API")},
 			)
 			defer func() {
 				if err := api.Close(); err != nil {

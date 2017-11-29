@@ -279,7 +279,7 @@ func newQueryReadCloser(fs fs.Filesystem, segments []readSegment, pass recordFil
 			for i, rc := range rcs {
 				if cerr := rc.Close(); cerr != nil {
 					reporter.ReportEvent(Event{
-						Op: "newQueryReadCloser", File: fmt.Sprintf("%d/%d", i, len(rcs)), Err: cerr,
+						Op: "newQueryReadCloser", File: fmt.Sprintf("%d/%d", i+1, len(rcs)), Err: cerr,
 						Msg: "Close of intermediate io.ReadCloser in error path failed",
 					})
 				}

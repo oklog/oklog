@@ -7,10 +7,10 @@ import (
 
 // Event is emitted by store components, typically when things go wrong.
 type Event struct {
-	Op   string // required
-	File string // optional
-	Err  error  // optional
-	Msg  string // optional
+	Op   string
+	File string
+	Err  error
+	Msg  string
 }
 
 // EventReporter can receive (and, presumably, do something with) Events.

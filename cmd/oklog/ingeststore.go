@@ -299,8 +299,12 @@ func runIngestStore(args []string) error {
 	level.Info(logger).Log("ingest_path", *ingestPath)
 
 	// Create storelog.
-	fileReporter := store.LogReporter{Logger: log.With(logger, "component", "FileLog")}
-	storeLog, err := store.NewFileLog(fsys, *storePath, *segmentTargetSize, *segmentBufferSize, fileReporter)
+	storeLog, err := store.NewFileLog(
+		fsys,
+		*storePath,
+		*segmentTargetSize, *segmentBufferSize,
+		store.LogReporter{Logger: log.With(logger, "component", "FileLog")},
+	)
 	if err != nil {
 		return err
 	}
@@ -454,7 +458,7 @@ func runIngestStore(args []string) error {
 				replicatedSegments.WithLabelValues("ingress"),
 				replicatedBytes.WithLabelValues("ingress"),
 				apiDuration,
-				logger,
+				store.LogReporter{Logger: log.With(logger, "component", "API")},
 			)
 			defer func() {
 				if err := api.Close(); err != nil {
