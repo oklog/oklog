@@ -299,7 +299,8 @@ func runIngestStore(args []string) error {
 	level.Info(logger).Log("ingest_path", *ingestPath)
 
 	// Create storelog.
-	storeLog, err := store.NewFileLog(fsys, *storePath, *segmentTargetSize, *segmentBufferSize, log.With(logger, "component", "FileLog"))
+	fileReporter := store.LogReporter{Logger: log.With(logger, "component", "FileLog")}
+	storeLog, err := store.NewFileLog(fsys, *storePath, *segmentTargetSize, *segmentBufferSize, fileReporter)
 	if err != nil {
 		return err
 	}

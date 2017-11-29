@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-kit/kit/log"
 	"github.com/oklog/oklog/pkg/fs"
 	"github.com/oklog/ulid"
 )
@@ -172,7 +171,7 @@ func BenchmarkMergeRecordsToLog(b *testing.B) {
 		charset           = "0123456789ABCDEFGHJKMNPQRSTVWXYZ "
 	)
 
-	dst, err := NewFileLog(fs.NewNopFilesystem(), "/", segmentTargetSize, segmentBufferSize, log.NewNopLogger())
+	dst, err := NewFileLog(fs.NewNopFilesystem(), "/", segmentTargetSize, segmentBufferSize, nil)
 	if err != nil {
 		b.Fatal(err)
 	}

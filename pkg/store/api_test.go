@@ -98,14 +98,14 @@ var (
 func newFixtureAPI(t *testing.T) (*API, error) {
 	// Loggers.
 	var (
-		baseLogger = log.NewLogfmtLogger(os.Stderr)
-		logLogger  = log.With(baseLogger, "component", "FileLog")
-		apiLogger  = log.With(baseLogger, "component", "API")
+		baseLogger  = log.NewLogfmtLogger(os.Stderr)
+		logReporter = LogReporter{log.With(baseLogger, "component", "FileLog")}
+		apiLogger   = log.With(baseLogger, "component", "API")
 	)
 
 	// Construct a virtual file log.
 	filesys := fs.NewVirtualFilesystem()
-	filelog, err := NewFileLog(filesys, "/", 10240, 1024, logLogger)
+	filelog, err := NewFileLog(filesys, "/", 10240, 1024, logReporter)
 	if err != nil {
 		return nil, err
 	}

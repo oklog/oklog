@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
@@ -44,12 +43,15 @@ type fileLog struct {
 	releaser          fs.Releaser // for the LOCK
 	segmentTargetSize int64
 	segmentBufferSize int64
-	logger            log.Logger // I'll take Overloaded Nomenclature for 500, Alex
+	reporter          EventReporter
 }
 
 // NewFileLog returns a Log backed by the filesystem at path root.
 // Note that we don't own segment files! They may disappear.
-func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64, logger log.Logger) (Log, error) {
+func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64, reporter EventReporter) (Log, error) {
+	if reporter == nil {
+		reporter = LogReporter{log.NewNopLogger()}
+	}
 	if err := filesys.MkdirAll(root); err != nil {
 		return nil, errors.Wrapf(err, "creating path %s", root)
 	}
@@ -72,7 +74,7 @@ func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBu
 		releaser:          r,
 		segmentTargetSize: segmentTargetSize,
 		segmentBufferSize: segmentBufferSize,
-		logger:            logger,
+		reporter:          reporter,
 	}, nil
 }
 
@@ -101,7 +103,7 @@ func (fl *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 	}
 
 	// Build the lazy reader.
-	rc, sz, err := newQueryReadCloser(fl.filesys, segments, pass, fl.segmentBufferSize, log.With(fl.logger, "subcomponent", "QueryReadCloser"))
+	rc, sz, err := newQueryReadCloser(fl.filesys, segments, pass, fl.segmentBufferSize, fl.reporter)
 	if err != nil {
 		return QueryResult{}, errors.Wrap(err, "constructing the lazy reader")
 	}
@@ -137,19 +139,16 @@ func (fl *fileLog) Overlapping() ([]ReadSegment, error) {
 			return nil // skip
 		}
 		if _, _, err := parseFilename(path); err != nil {
-			level.Error(fl.logger).Log(
-				"file", path,
-				"err", err,
-				"size", info.Size(),
-				"msg", "will remove apparently bad data file",
-			)
+			fl.reporter.ReportEvent(Event{
+				Op: "Overlapping", File: path, Err: err,
+				Msg: fmt.Sprintf("will remove apparently-bad data file of size %d", info.Size()),
+			})
 			// TODO(pb): re-parse and recover this file, async
 			if err := fl.filesys.Remove(path); err != nil {
-				level.Error(fl.logger).Log(
-					"file", path,
-					"err", err,
-					"msg", "tried to remove bad data file, which failed",
-				)
+				fl.reporter.ReportEvent(Event{
+					Op: "Overlapping", File: path, Err: err,
+					Msg: "tried to remove apparently-bad data file, which failed",
+				})
 			}
 			return nil // weird; ignore
 		}
@@ -222,14 +221,16 @@ func (fl *fileLog) Sequential() ([]ReadSegment, error) {
 		}
 		a, _, err := parseFilename(path)
 		if err != nil {
-			level.Warn(fl.logger).Log("method", "Sequential", "file", path, "err", err)
+			fl.reporter.ReportEvent(Event{
+				Op: "Sequential", File: path, Err: err,
+				Msg: fmt.Sprintf("will remove apparently-bad data file of size %d", info.Size()),
+			})
 			// TODO(pb): re-parse and recover this file, async
 			if err := fl.filesys.Remove(path); err != nil {
-				level.Error(fl.logger).Log(
-					"file", path,
-					"err", err,
-					"msg", "tried to remove bad data file, which failed",
-				)
+				fl.reporter.ReportEvent(Event{
+					Op: "Sequential", File: path, Err: err,
+					Msg: "tried to remove apparently-bad data file, which failed",
+				})
 			}
 			return nil // weird; skip
 		}
@@ -276,14 +277,16 @@ func (fl *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
 		}
 		_, high, err := parseFilename(path)
 		if err != nil {
-			level.Warn(fl.logger).Log("during", "Trashable", "file", path, "err", err)
+			fl.reporter.ReportEvent(Event{
+				Op: "Trashable", File: path, Err: err,
+				Msg: fmt.Sprintf("will remove apparently-bad data file of size %d", info.Size()),
+			})
 			// TODO(pb): re-parse and recover this file, async
 			if err := fl.filesys.Remove(path); err != nil {
-				level.Error(fl.logger).Log(
-					"file", path,
-					"err", err,
-					"msg", "tried to remove bad data file, which failed",
-				)
+				fl.reporter.ReportEvent(Event{
+					Op: "Trashable", File: path, Err: err,
+					Msg: "tried to remove apparently-bad data file, which failed",
+				})
 			}
 			return nil // weird; skip
 		}
@@ -459,14 +462,16 @@ func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []readSeg
 		}
 		low, high, err := parseFilename(path)
 		if err != nil {
-			level.Error(fl.logger).Log("during", "queryMatchingSegments", "file", path, "err", err)
+			fl.reporter.ReportEvent(Event{
+				Op: "queryMatchingSegments", File: path, Err: err,
+				Msg: fmt.Sprintf("will remove apparently-bad data file of size %d", info.Size()),
+			})
 			// TODO(pb): re-parse and recover this file, async
 			if err := fl.filesys.Remove(path); err != nil {
-				level.Error(fl.logger).Log(
-					"file", path,
-					"err", err,
-					"msg", "tried to remove bad data file, which failed",
-				)
+				fl.reporter.ReportEvent(Event{
+					Op: "queryMatchingSegments", File: path, Err: err,
+					Msg: "tried to remove apparently-bad data file, which failed",
+				})
 			}
 			return nil // weird; skip
 		}
@@ -478,9 +483,14 @@ func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []readSeg
 		case nil:
 			segments = append(segments, readSegment{path, file, info.Size()})
 		case os.ErrNotExist:
-			level.Warn(fl.logger).Log("file", path, "err", err, "msg", "this can happen due to e.g. compaction")
+			fl.reporter.ReportEvent(Event{
+				Op: "queryMatchingSegments", File: path, Err: err,
+				Msg: "this can happen due to e.g. compaction",
+			})
 		default:
-			level.Error(fl.logger).Log("file", path, "err", err)
+			fl.reporter.ReportEvent(Event{
+				Op: "queryMatchingSegments", File: path, Err: err,
+			})
 		}
 		return nil
 	})

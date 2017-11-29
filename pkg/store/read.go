@@ -9,8 +9,6 @@ import (
 
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio"
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
 
@@ -271,7 +269,7 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 // Records are yielded in time order, oldest first, hopefully efficiently!
 // Only records passing the recordFilter are yielded.
 // The sz of the segment files can be used as a proxy for read effort.
-func newQueryReadCloser(fs fs.Filesystem, segments []readSegment, pass recordFilter, bufsz int64, logger log.Logger) (rc io.ReadCloser, sz int64, err error) {
+func newQueryReadCloser(fs fs.Filesystem, segments []readSegment, pass recordFilter, bufsz int64, reporter EventReporter) (rc io.ReadCloser, sz int64, err error) {
 	// We will build successive ReadClosers for each batch.
 	var rcs []io.ReadCloser
 
@@ -280,14 +278,10 @@ func newQueryReadCloser(fs fs.Filesystem, segments []readSegment, pass recordFil
 		if err != nil {
 			for i, rc := range rcs {
 				if cerr := rc.Close(); cerr != nil {
-					level.Error(logger).Log(
-						"in", "newQueryReadCloser shutdown due to error",
-						"err", err,
-						"fd", fmt.Sprint(i),
-						"of", fmt.Sprint(len(rcs)),
-						"during", "Close",
-						"gave", cerr,
-					)
+					reporter.ReportEvent(Event{
+						Op: "newQueryReadCloser", File: fmt.Sprintf("%d/%d", i, len(rcs)), Err: cerr,
+						Msg: "Close of intermediate io.ReadCloser in error path failed",
+					})
 				}
 			}
 			rcs = nil

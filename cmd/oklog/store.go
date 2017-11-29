@@ -195,7 +195,8 @@ func runStore(args []string) error {
 	default:
 		return errors.Errorf("invalid -filesystem %q", *filesystem)
 	}
-	storeLog, err := store.NewFileLog(fsys, *storePath, *segmentTargetSize, *segmentBufferSize, log.With(logger, "component", "FileLog"))
+	storeReporter := store.LogReporter{Logger: log.With(logger, "component", "FileLog")}
+	storeLog, err := store.NewFileLog(fsys, *storePath, *segmentTargetSize, *segmentBufferSize, storeReporter)
 	if err != nil {
 		return err
 	}
