@@ -8,7 +8,7 @@ func TestLock(t *testing.T) {
 	lock := "TESTLOCK"
 	for name, filesys := range map[string]Filesystem{
 		"virtual": NewVirtualFilesystem(),
-		"real":    NewRealFilesystem(false),
+		"real":    NewRealFilesystem(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			r, existed, err := filesys.Lock(lock)

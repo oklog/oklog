@@ -229,9 +229,7 @@ func runIngest(args []string) error {
 	var fsys fs.Filesystem
 	switch strings.ToLower(*filesystem) {
 	case "real":
-		fsys = fs.NewRealFilesystem(false)
-	case "real-mmap":
-		fsys = fs.NewRealFilesystem(true)
+		fsys = fs.NewRealFilesystem()
 	case "virtual":
 		fsys = fs.NewVirtualFilesystem()
 	case "nop":

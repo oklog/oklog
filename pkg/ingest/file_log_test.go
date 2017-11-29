@@ -65,7 +65,7 @@ func TestLockBehavior(t *testing.T) {
 	root := filepath.Join("testdata", "TestStaleLockSucceeds")
 	for name, factory := range map[string]func() fs.Filesystem{
 		"virtual": fs.NewVirtualFilesystem,
-		"real":    func() fs.Filesystem { return fs.NewRealFilesystem(false) },
+		"real":    fs.NewRealFilesystem,
 	} {
 		t.Run(name, func(t *testing.T) {
 			// Generate a filesystem and rootpath.
