@@ -20,6 +20,8 @@ import (
 )
 
 func TestTeeRecords(t *testing.T) {
+	t.Parallel()
+
 	var records = []string{
 		"01BB6RQR190000000000000000 Foo\n",
 		"01BB6RRTB70000000000000000 Bar\n",
@@ -56,6 +58,8 @@ func TestTeeRecords(t *testing.T) {
 }
 
 func TestAPIInternalQueryFromULID(t *testing.T) {
+	t.Parallel()
+
 	a, err := newFixtureAPI(t)
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +138,7 @@ func newFixtureAPI(t *testing.T) (*API, error) {
 
 	// Debug: dump the filesys.
 	filesys.Walk("/", func(path string, info os.FileInfo, err error) error {
-		t.Logf("### Walk: %s (%dB)", path, info.Size())
+		t.Logf("Debug: Walk: %s (%dB)", path, info.Size())
 		return nil
 	})
 
