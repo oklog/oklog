@@ -284,7 +284,7 @@ func runStore(args []string) error {
 			compactDuration,
 			trashedSegments,
 			purgedSegments,
-			log.With(logger, "component", "Compacter"),
+			store.LogReporter{Logger: log.With(logger, "component", "Compacter")},
 		)
 		g.Add(func() error {
 			c.Run()
