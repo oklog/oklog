@@ -16,7 +16,7 @@ import (
 
 func TestHandleConnectionsCleanup(t *testing.T) {
 	// Bind a listener on some port.
-	ln, err := net.Listen("tcp", ":0")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,12 +61,20 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 	}
 
 	// Write something to make sure the connection is good.
-	if _, err := fmt.Fprintln(conn, "hello world"); err != nil {
+	message := "hello, world!\n"
+	if n, err := fmt.Fprint(conn, message); err != nil {
 		t.Fatal(err)
+	} else if want, have := len(message), n; want != have {
+		t.Fatalf("n: want %d, have %d", want, have)
+	}
+	if !within(time.Second, func() bool {
+		return atomic.LoadUint64(&fs.wr) > 0
+	}) {
+		t.Fatal("timeout waiting for write")
 	}
 
 	// Make sure closing the listener triggers the segment to flush.
-	pre := atomic.LoadUint64(&fs.closures)
+	pre := atomic.LoadUint64(&fs.cl)
 	if err := ln.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +86,7 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 	}
 	var post uint64
 	if !within(time.Second, func() bool {
-		post = atomic.LoadUint64(&fs.closures)
+		post = atomic.LoadUint64(&fs.cl)
 		return (post - pre) > 0
 	}) {
 		t.Errorf("timeout waiting for Close: initial Closes=%d, current Closes=%d", pre, post)
@@ -115,10 +123,10 @@ func within(d time.Duration, f func() bool) bool {
 	return false
 }
 
-type mockFilesystem struct{ closures uint64 }
+type mockFilesystem struct{ wr, cl uint64 }
 
-func (fs *mockFilesystem) Create(path string) (fs.File, error)               { return &mockFile{&fs.closures}, nil }
-func (fs *mockFilesystem) Open(path string) (fs.File, error)                 { return &mockFile{&fs.closures}, nil }
+func (fs *mockFilesystem) Create(path string) (fs.File, error)               { return &mockFile{&fs.wr, &fs.cl}, nil }
+func (fs *mockFilesystem) Open(path string) (fs.File, error)                 { return &mockFile{&fs.wr, &fs.cl}, nil }
 func (fs *mockFilesystem) Remove(path string) error                          { return nil }
 func (fs *mockFilesystem) Rename(oldname, newname string) error              { return nil }
 func (fs *mockFilesystem) Exists(path string) bool                           { return false }
@@ -127,11 +135,11 @@ func (fs *mockFilesystem) Chtimes(path string, atime, mtime time.Time) error { r
 func (fs *mockFilesystem) Walk(root string, walkFn filepath.WalkFunc) error  { return nil }
 func (fs *mockFilesystem) Lock(string) (fs.Releaser, bool, error)            { return mockReleaser{}, false, nil }
 
-type mockFile struct{ closures *uint64 }
+type mockFile struct{ wr, cl *uint64 }
 
 func (f *mockFile) Read(p []byte) (int, error)  { return len(p), nil }
-func (f *mockFile) Write(p []byte) (int, error) { return len(p), nil }
-func (f *mockFile) Close() error                { atomic.AddUint64(f.closures, 1); return nil }
+func (f *mockFile) Write(p []byte) (int, error) { atomic.AddUint64(f.wr, 1); return len(p), nil }
+func (f *mockFile) Close() error                { atomic.AddUint64(f.cl, 1); return nil }
 func (f *mockFile) Name() string                { return "" }
 func (f *mockFile) Size() int64                 { return 0 }
 func (f *mockFile) Sync() error                 { return nil }
