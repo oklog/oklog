@@ -71,16 +71,19 @@ func TestRecoverSegments(t *testing.T) {
 	t.Parallel()
 
 	filesys := fs.NewVirtualFilesystem()
-	for _, filename := range []string{
-		"ACTIVE." + extActive,
-		"FLUSHED." + extFlushed,
-		"READING." + extReading,
-		"TRASHED." + extTrashed,
-		"IGNORED.ignored",
+	for filename, contents := range map[string]string{
+		"ACTIVE" + extActive:   "01ARYZ6S41TSV4RRFFQ69G5FAV One\n01ARYZ6S41TSV4RRFFZZZZZZZZ Two\n",
+		"FLUSHED" + extFlushed: "Contents ignoredt",
+		"READING" + extReading: "Contents ignored",
+		"TRASHED" + extTrashed: "Contents ignored",
+		"IGNORED.ignored":      "Contents ignored",
 	} {
 		f, err := filesys.Create(filename)
 		if err != nil {
 			t.Fatalf("%s: Create: %v", filename, err)
+		}
+		if _, err := f.Write([]byte(contents)); err != nil {
+			t.Fatalf("%s: Write: %v", filename, err)
 		}
 		if err := f.Close(); err != nil {
 			t.Fatalf("%s: Close: %v", filename, err)
@@ -97,14 +100,13 @@ func TestRecoverSegments(t *testing.T) {
 	}
 	defer filelog.Close()
 
-	files := map[string]bool{
-		// file                  expected
-		lockFile:                true,
-		"ACTIVE." + extFlushed:  true,
-		"FLUSHED." + extFlushed: true,
-		"READING." + extFlushed: true,
-		"TRASHED." + extTrashed: true,
-		"IGNORED.ignored":       true,
+	files := map[string]bool{ // file: expected
+		"01ARYZ6S41TSV4RRFFQ69G5FAV-01ARYZ6S41TSV4RRFFZZZZZZZZ" + extFlushed: true,
+		"FLUSHED" + extFlushed:                                               true,
+		"READING" + extFlushed:                                               true,
+		"TRASHED" + extTrashed:                                               true,
+		"IGNORED.ignored":                                                    true,
+		lockFile:                                                             true,
 	}
 	filesys.Walk("", func(path string, info os.FileInfo, err error) error {
 		if _, ok := files[path]; ok {

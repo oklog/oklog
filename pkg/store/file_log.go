@@ -378,7 +378,7 @@ func (fl *fileLog) Close() error {
 }
 
 func recoverSegments(filesys fs.Filesystem, root string) error {
-	var toRename []string
+	var toRename, toReprocess []string
 	filesys.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -387,14 +387,39 @@ func recoverSegments(filesys fs.Filesystem, root string) error {
 			return nil // recurse
 		}
 		switch filepath.Ext(path) {
-		case extReading, extActive:
+		case extActive:
+			toReprocess = append(toReprocess, path)
+		case extReading:
 			toRename = append(toRename, path)
 		}
 		return nil
 	})
+
+	for _, path := range toReprocess {
+		// mergeRecords has the side effect of extracting the low and high ULIDs
+		// from a segment file. We use it for that side effect. This is a little
+		// bit inefficient; that's OK.
+		f, err := filesys.Open(path)
+		if err != nil {
+			return err
+		}
+		lo, hi, _, err := mergeRecords(ioutil.Discard, f)
+		f.Close() // ignore error, for now
+		if err != nil {
+			return err
+		}
+		var (
+			oldname = path
+			newname = fmt.Sprintf("%s-%s%s", lo, hi, extFlushed)
+		)
+		if err := filesys.Rename(oldname, newname); err != nil {
+			return err
+		}
+	}
+
+	// It's possible this will create duplicate records.
+	// We rely on repair and compaction to remove them.
 	for _, path := range toRename {
-		// It's possible this will create duplicate records.
-		// We rely on repair and compaction to remove them.
 		var (
 			oldname = path
 			newname = modifyExtension(oldname, extFlushed)
@@ -403,6 +428,7 @@ func recoverSegments(filesys fs.Filesystem, root string) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
