@@ -171,7 +171,7 @@ func BenchmarkMergeRecordsToLog(b *testing.B) {
 		charset           = "0123456789ABCDEFGHJKMNPQRSTVWXYZ "
 	)
 
-	dst, err := NewFileLog(fs.NewNopFilesystem(), "/", segmentTargetSize, segmentBufferSize)
+	dst, err := NewFileLog(fs.NewNopFilesystem(), "/", segmentTargetSize, segmentBufferSize, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -251,12 +251,36 @@ func TestBatchSegments(t *testing.T) {
 		},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
-			if want, have := testcase.want, batchSegments(testcase.input); !reflect.DeepEqual(want, have) {
+			// Transform strings to nop readSegments.
+			segments := make([]readSegment, len(testcase.input))
+			for i, path := range testcase.input {
+				segments[i] = readSegment{path: path, file: nopReadCloser{}}
+			}
+
+			// Batch them.
+			result := batchSegments(segments)
+
+			// Extract ranges.
+			have := make([][]string, len(result))
+			for i, segments := range result {
+				have[i] = make([]string, len(segments))
+				for j, segment := range segments {
+					have[i][j] = segment.path
+				}
+			}
+
+			// Check.
+			if want, have := testcase.want, have; !reflect.DeepEqual(want, have) {
 				t.Fatalf("want %v, have %v", want, have)
 			}
 		})
 	}
 }
+
+type nopReadCloser struct{}
+
+func (nopReadCloser) Read([]byte) (int, error) { return 0, io.EOF }
+func (nopReadCloser) Close() error             { return nil }
 
 func TestMergeReadCloser(t *testing.T) {
 	t.Parallel()
@@ -506,7 +530,7 @@ func TestIssue41(t *testing.T) {
 	var (
 		filesys  = fs.NewVirtualFilesystem()
 		filename = "extant"
-		segments = []string{filename, "nonexistant"}
+		segments = []readSegment{{path: filename, file: nopReadCloser{}}, {path: "nonexistant", file: nopReadCloser{}}}
 		pass     = func([]byte) bool { return true }
 		bufsz    = int64(1024)
 	)
@@ -517,10 +541,8 @@ func TestIssue41(t *testing.T) {
 	}
 	f.Close()
 
-	// Should error but not panic.
-	if _, _, err = makeConcurrentFilteringReadClosers(filesys, segments, pass, bufsz); err == nil {
-		t.Errorf("expected error, got none")
-	}
+	// Should not panic.
+	makeConcurrentFilteringReadClosers(filesys, segments, pass, bufsz)
 }
 
 type mockLog struct {

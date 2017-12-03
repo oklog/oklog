@@ -14,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -55,7 +53,7 @@ type API struct {
 	replicatedSegments prometheus.Counter
 	replicatedBytes    prometheus.Counter
 	duration           *prometheus.HistogramVec
-	logger             log.Logger
+	reporter           EventReporter
 }
 
 // NewAPI returns a usable API.
@@ -65,7 +63,7 @@ func NewAPI(
 	queryClient, streamClient Doer,
 	replicatedSegments, replicatedBytes prometheus.Counter,
 	duration *prometheus.HistogramVec,
-	logger log.Logger,
+	reporter EventReporter,
 ) *API {
 	return &API{
 		peer:               peer,
@@ -76,7 +74,7 @@ func NewAPI(
 		replicatedSegments: replicatedSegments,
 		replicatedBytes:    replicatedBytes,
 		duration:           duration,
-		logger:             logger,
+		reporter:           reporter,
 	}
 }
 
@@ -197,11 +195,16 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 	qr := QueryResult{Params: qp}
 
 	// We'll merge all records in a single pass.
-	var readClosers []io.ReadCloser
+	var rcs []io.ReadCloser
 	defer func() {
 		// Don't leak if we need to make an early return.
-		for _, rc := range readClosers {
-			rc.Close()
+		for i, rc := range rcs {
+			if err := rc.Close(); err != nil {
+				a.reporter.ReportEvent(Event{
+					Op: "handleUserQuery", Error: err,
+					Msg: fmt.Sprintf("Close of intermediate io.ReadCloser %d/%d failed", i+1, len(rcs)),
+				})
+			}
 		}
 	}()
 
@@ -210,16 +213,19 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 	for i := 0; i < len(responses); i++ {
 		responses[i] = <-c
 	}
-	for _, response := range responses {
+	for i, response := range responses {
 		// Direct error, network problem?
 		if response.err != nil {
-			level.Error(a.logger).Log("during", "query_gather", "err", response.err)
+			a.reporter.ReportEvent(Event{
+				Op: "handleUserQuery", Error: response.err,
+				Msg: fmt.Sprintf("gather query response from store %d/%d: total failure", i+1, len(responses)),
+			})
 			qr.ErrorCount++
 			continue
 		}
 
-		// Non-200, bad parameters or internal server error?
-		if response.resp.StatusCode != http.StatusOK {
+		// Non-2xx: internal server error or bad request?
+		if (response.resp.StatusCode / 100) != 2 {
 			buf, err := ioutil.ReadAll(response.resp.Body)
 			if err != nil {
 				buf = []byte(err.Error())
@@ -228,23 +234,40 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 				buf = []byte("unknown")
 			}
 			response.resp.Body.Close()
-			level.Error(a.logger).Log("during", "query_gather", "status_code", response.resp.StatusCode, "err", strings.TrimSpace(string(buf)))
+			a.reporter.ReportEvent(Event{
+				Op: "handleUserQuery", Error: fmt.Errorf(response.resp.Status),
+				Msg: fmt.Sprintf("gather query response from store %d/%d: bad status (%s)", i+1, len(responses), strings.TrimSpace(string(buf))),
+			})
 			qr.ErrorCount++
 			continue
+		}
+
+		// 206 is returned when a store knows it missed something.
+		// For now, just emit an event, so it's possible to triage.
+		if response.resp.StatusCode == http.StatusPartialContent {
+			a.reporter.ReportEvent(Event{
+				Op:  "handleUserQuery",
+				Msg: fmt.Sprintf("gather query response from store %d/%d: partial content", i+1, len(responses)),
+			})
+			// TODO(pb): should we signal this in the QueryResult?
+			// It shouldn't be an ErrorCount; maybe something else?
 		}
 
 		// Decode the individual result.
 		var partialResult QueryResult
 		if err := partialResult.DecodeFrom(response.resp); err != nil {
 			err = errors.Wrap(err, "decoding partial result")
-			level.Error(a.logger).Log("during", "query_gather", "err", err)
+			a.reporter.ReportEvent(Event{
+				Op: "handleUserQuery", Error: err,
+				Msg: fmt.Sprintf("gather query response from store %d/%d: invalid response", i+1, len(responses)),
+			})
 			qr.ErrorCount++
 			continue
 		}
 
 		// We do a single lazy merge of all records, at the end!
 		// Extract the records ReadCloser, for later processing.
-		readClosers = append(readClosers, partialResult.Records)
+		rcs = append(rcs, partialResult.Records)
 		partialResult.Records = nil
 
 		// Merge everything else, though.
@@ -256,14 +279,14 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Now bind all the partial ReadClosers together.
-	mrc, err := newMergeReadCloser(readClosers)
+	mrc, err := newMergeReadCloser(rcs)
 	if err != nil {
 		err = errors.Wrap(err, "constructing merging reader")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	qr.Records = mrc                // lazy reader
-	readClosers = []io.ReadCloser{} // don't double-close on return
+	qr.Records = mrc // lazy reader
+	rcs = nil        // don't double-close on return
 
 	// Return!
 	qr.Duration = time.Since(begin).String() // overwrite

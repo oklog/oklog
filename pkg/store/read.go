@@ -3,6 +3,7 @@ package store
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
 
@@ -268,16 +269,22 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 // Records are yielded in time order, oldest first, hopefully efficiently!
 // Only records passing the recordFilter are yielded.
 // The sz of the segment files can be used as a proxy for read effort.
-func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, bufsz int64) (rc io.ReadCloser, sz int64, err error) {
+func newQueryReadCloser(fs fs.Filesystem, segments []readSegment, pass recordFilter, bufsz int64, reporter EventReporter) (rc io.ReadCloser, sz int64, err error) {
 	// We will build successive ReadClosers for each batch.
 	var rcs []io.ReadCloser
 
 	// Don't leak FDs on error.
 	defer func() {
 		if err != nil {
-			for _, rc := range rcs {
-				rc.Close()
+			for i, rc := range rcs {
+				if cerr := rc.Close(); cerr != nil {
+					reporter.ReportEvent(Event{
+						Op: "newQueryReadCloser", Error: cerr,
+						Msg: fmt.Sprintf("Close of intermediate io.ReadCloser %d/%d in error path failed", i+1, len(rcs)),
+					})
+				}
 			}
+			rcs = nil
 		}
 	}()
 
@@ -289,12 +296,8 @@ func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, 
 
 		case 1:
 			// A batch of one can be read straight thru.
-			f, err := fs.Open(batch[0])
-			if err != nil {
-				return nil, sz, err
-			}
-			rcs = append(rcs, newConcurrentFilteringReadCloser(f, pass, bufsz))
-			sz += f.Size()
+			sz += batch[0].size
+			rcs = append(rcs, newConcurrentFilteringReadCloser(batch[0].file, pass, bufsz))
 
 		default:
 			// A batch of N requires a K-way merge.
@@ -319,34 +322,34 @@ func newQueryReadCloser(fs fs.Filesystem, segments []string, pass recordFilter, 
 }
 
 // batchSegments batches segments together if they overlap in time.
-func batchSegments(segments []string) [][]string {
+func batchSegments(segments []readSegment) [][]readSegment {
 	// First, parse ranges from filename.
 	// TODO(pb): handle weird filenames better, somehow
 	type lexrange struct{ a, b string }
 	ranges := make([]lexrange, len(segments))
 	for i := range segments {
-		f := strings.SplitN(basename(segments[i]), "-", 2)
+		f := strings.SplitN(basename(segments[i].path), "-", 2)
 		ranges[i] = lexrange{f[0], f[1]}
 	}
 
 	// Now, walk the segments.
 	var (
-		result = [][]string{}
-		group  []string // current
-		b      string   // of the group
+		result = [][]readSegment{} // non-nil
+		group  []readSegment       // that we're currently building
+		b      string              // end ULID of the group
 	)
 	for i := range segments {
 		switch {
 		case len(group) <= 0:
 			// If the group is empty, it gets the segment.
-			group = []string{segments[i]}
+			group = []readSegment{segments[i]}
 			b = ranges[i].b
 
 		case ranges[i].a > b:
 			// If the current segment doesn't overlap with the group,
 			// the group is closed and we start a new group.
 			result = append(result, group)
-			group = []string{segments[i]}
+			group = []readSegment{segments[i]}
 			b = ranges[i].b
 
 		default:
@@ -363,26 +366,12 @@ func batchSegments(segments []string) [][]string {
 	return result
 }
 
-func makeConcurrentFilteringReadClosers(fs fs.Filesystem, segments []string, pass recordFilter, bufsz int64) (rcs []io.ReadCloser, sz int64, err error) {
-	// Don't leak FDs on error.
-	defer func() {
-		if err != nil {
-			for _, rc := range rcs {
-				rc.Close()
-			}
-			rcs = nil
-		}
-	}()
-
-	for _, segment := range segments {
-		f, err := fs.Open(segment)
-		if err != nil {
-			return rcs, sz, err
-		}
-		rcs = append(rcs, newConcurrentFilteringReadCloser(f, pass, bufsz))
-		sz += f.Size()
+func makeConcurrentFilteringReadClosers(fs fs.Filesystem, segments []readSegment, pass recordFilter, bufsz int64) (rcs []io.ReadCloser, sz int64, err error) {
+	rcs = make([]io.ReadCloser, len(segments))
+	for i := range segments {
+		sz += segments[i].size
+		rcs[i] = newConcurrentFilteringReadCloser(segments[i].file, pass, bufsz)
 	}
-
 	return rcs, sz, nil
 }
 
@@ -415,6 +404,13 @@ func newConcurrentFilteringReadCloser(src io.ReadCloser, pass recordFilter, bufs
 		w.CloseWithError(s.Err())
 	}()
 	return r
+}
+
+// readSegment models a segment file on disk.
+type readSegment struct {
+	path string // ULID-ULID.extension
+	file io.ReadCloser
+	size int64
 }
 
 // mergeReadCloser performs a K-way merge from multiple readers.

@@ -1,12 +1,11 @@
 package store
 
 import (
+	"fmt"
 	"io"
 	"strconv"
 	"time"
 
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -22,12 +21,17 @@ type Compacter struct {
 	compactDuration   *prometheus.HistogramVec
 	trashSegments     *prometheus.CounterVec
 	purgeSegments     *prometheus.CounterVec
-	logger            log.Logger
+	reporter          EventReporter
 }
 
 // NewCompacter creates a Compacter.
 // Don't forget to Run it.
-func NewCompacter(log Log, segmentTargetSize int64, retain time.Duration, purge time.Duration, compactDuration *prometheus.HistogramVec, trashSegments, purgeSegments *prometheus.CounterVec, logger log.Logger) *Compacter {
+func NewCompacter(
+	log Log,
+	segmentTargetSize int64, retain time.Duration, purge time.Duration,
+	compactDuration *prometheus.HistogramVec, trashSegments, purgeSegments *prometheus.CounterVec,
+	reporter EventReporter,
+) *Compacter {
 	return &Compacter{
 		log:               log,
 		segmentTargetSize: segmentTargetSize,
@@ -37,7 +41,7 @@ func NewCompacter(log Log, segmentTargetSize int64, retain time.Duration, purge 
 		trashSegments:     trashSegments,
 		purgeSegments:     purgeSegments,
 		compactDuration:   compactDuration,
-		logger:            logger,
+		reporter:          reporter,
 	}
 }
 
@@ -67,7 +71,12 @@ func (c *Compacter) Run() {
 
 // Stop the compacter from compacting.
 func (c *Compacter) Stop() {
-	defer func(begin time.Time) { level.Debug(c.logger).Log("shutdown_took", time.Since(begin)) }(time.Now())
+	defer func(begin time.Time) {
+		c.reporter.ReportEvent(Event{
+			Debug: true, Op: "Stop",
+			Msg: fmt.Sprintf("shutdown took %s", time.Since(begin)),
+		})
+	}(time.Now())
 	q := make(chan struct{})
 	c.stop <- q
 	<-q
@@ -88,7 +97,10 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 		return 0, "NoSegmentsAvailable" // no problem
 	}
 	if err != nil {
-		level.Error(c.logger).Log("during", "getSegments", "kind", kind, "err", err)
+		c.reporter.ReportEvent(Event{
+			Op: "compact", Error: err,
+			Msg: fmt.Sprintf("compact %s failed during getSegments", kind),
+		})
 		return 0, "Error"
 	}
 	defer func() {
@@ -96,7 +108,10 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 		for _, readSegment := range readSegments {
 			if err := readSegment.Reset(); err != nil {
 				// We can't do anything but log the error.
-				level.Error(c.logger).Log("during", "Reset", "kind", kind, "err", err)
+				c.reporter.ReportEvent(Event{
+					Op: "compact", Error: err,
+					Msg: fmt.Sprintf("compact %s failed to Reset a read segment", kind),
+				})
 			}
 		}
 	}()
@@ -109,7 +124,10 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 		readers[i] = readSegment
 	}
 	if _, err := mergeRecordsToLog(c.log, c.segmentTargetSize, readers...); err != nil {
-		level.Error(c.logger).Log("during", "mergeRecordsToLog", "kind", kind, "err", err)
+		c.reporter.ReportEvent(Event{
+			Op: "compact", Error: err,
+			Msg: fmt.Sprintf("compact %s failed during mergeRecordsToLog", kind),
+		})
 		return 0, "Error"
 	}
 
@@ -120,7 +138,10 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 		// which is no big deal, and we might catch it in another pass of the
 		// compacter.
 		if err := readSegment.Purge(); err != nil {
-			level.Warn(c.logger).Log("during", "Purge", "kind", kind, "err", err)
+			c.reporter.ReportEvent(Event{
+				Op: "compact", Warning: err,
+				Msg: fmt.Sprintf("compact %s failed to Purge a read segment, which is not critical", kind),
+			})
 		}
 	}
 
@@ -135,14 +156,21 @@ func (c *Compacter) moveToTrash() {
 	readSegments, err := c.log.Trashable(oldestRecord)
 	if err == ErrNoSegmentsAvailable {
 		return // no problem
-	} else if err != nil {
-		level.Error(c.logger).Log("during", "Trashable", "err", err)
+	}
+	if err != nil {
+		c.reporter.ReportEvent(Event{
+			Op: "moveToTrash", Error: err,
+			Msg: "fetching Trashable read segments failed",
+		})
 		return
 	}
 	for _, segment := range readSegments {
 		if err := segment.Trash(); err != nil {
 			// We can't do anything but log the error.
-			level.Error(c.logger).Log("during", "Trash", "err", err)
+			c.reporter.ReportEvent(Event{
+				Op: "moveToTrash", Error: err,
+				Msg: "Trashing a read segment failed",
+			})
 		}
 	}
 }
@@ -152,14 +180,21 @@ func (c *Compacter) emptyTrash() {
 	trashSegments, err := c.log.Purgeable(oldestModTime)
 	if err == ErrNoSegmentsAvailable {
 		return // no problem
-	} else if err != nil {
-		level.Error(c.logger).Log("during", "Purgeable", "err", err)
+	}
+	if err != nil {
+		c.reporter.ReportEvent(Event{
+			Op: "emptyTrash", Error: err,
+			Msg: "fetching Purgeable segments failed",
+		})
 		return
 	}
 	for _, segment := range trashSegments {
 		if err := segment.Purge(); err != nil {
 			// We can't do anything but log the error.
-			level.Error(c.logger).Log("during", "Purge", "err", err)
+			c.reporter.ReportEvent(Event{
+				Op: "emptyTrash", Error: err,
+				Msg: "Purging a read segment failed",
+			})
 		}
 	}
 }

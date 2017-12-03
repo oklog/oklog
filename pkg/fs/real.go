@@ -8,22 +8,17 @@ import (
 	"time"
 
 	"github.com/prometheus/prometheus/util/flock"
-
-	"github.com/oklog/oklog/pkg/ioext"
-	"github.com/oklog/oklog/pkg/mmap"
 )
 
 const mkdirAllMode = 0755
 
 // NewRealFilesystem yields a real disk filesystem
 // with optional memory mapping for file reading.
-func NewRealFilesystem(mmap bool) Filesystem {
-	return realFilesystem{mmap: mmap}
+func NewRealFilesystem() Filesystem {
+	return realFilesystem{}
 }
 
-type realFilesystem struct {
-	mmap bool
-}
+type realFilesystem struct{}
 
 func (realFilesystem) Create(path string) (File, error) {
 	f, err := os.Create(path)
@@ -39,20 +34,11 @@ func (fs realFilesystem) Open(path string) (File, error) {
 	if err != nil {
 		return nil, err
 	}
-	rf := realFile{
+	return realFile{
 		File:   f,
 		Reader: f,
 		Closer: f,
-	}
-	if fs.mmap {
-		r, err := mmap.New(f)
-		if err != nil {
-			return nil, err
-		}
-		rf.Reader = ioext.OffsetReader(r, 0)
-		rf.Closer = multiCloser{r, f}
-	}
-	return rf, nil
+	}, nil
 }
 
 func (realFilesystem) Remove(path string) error {

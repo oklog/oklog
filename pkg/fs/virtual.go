@@ -90,9 +90,16 @@ func (fs *virtualFilesystem) Chtimes(path string, atime, mtime time.Time) error 
 }
 
 func (fs *virtualFilesystem) Walk(root string, walkFn filepath.WalkFunc) error {
+	// Snapshot current files.
+	files := map[string]*virtualFile{}
 	fs.mtx.Lock()
-	defer fs.mtx.Unlock()
-	for path, f := range fs.files {
+	for path, file := range fs.files {
+		files[path] = file
+	}
+	fs.mtx.Unlock()
+
+	// Walk snapshot, out of lock.
+	for path, f := range files {
 		if !strings.HasPrefix(path, root) {
 			continue // TODO(pb): this heuristic could be better, if necessary
 		}

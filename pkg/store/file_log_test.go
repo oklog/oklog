@@ -1,10 +1,15 @@
 package store
 
 import (
+	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/oklog/ulid"
 
 	"github.com/oklog/oklog/pkg/fs"
 )
@@ -66,16 +71,19 @@ func TestRecoverSegments(t *testing.T) {
 	t.Parallel()
 
 	filesys := fs.NewVirtualFilesystem()
-	for _, filename := range []string{
-		"ACTIVE." + extActive,
-		"FLUSHED." + extFlushed,
-		"READING." + extReading,
-		"TRASHED." + extTrashed,
-		"IGNORED.ignored",
+	for filename, contents := range map[string]string{
+		"ACTIVE" + extActive:   "01ARYZ6S41TSV4RRFFQ69G5FAV One\n01ARYZ6S41TSV4RRFFZZZZZZZZ Two\n",
+		"FLUSHED" + extFlushed: "Contents ignoredt",
+		"READING" + extReading: "Contents ignored",
+		"TRASHED" + extTrashed: "Contents ignored",
+		"IGNORED.ignored":      "Contents ignored",
 	} {
 		f, err := filesys.Create(filename)
 		if err != nil {
 			t.Fatalf("%s: Create: %v", filename, err)
+		}
+		if _, err := f.Write([]byte(contents)); err != nil {
+			t.Fatalf("%s: Write: %v", filename, err)
 		}
 		if err := f.Close(); err != nil {
 			t.Fatalf("%s: Close: %v", filename, err)
@@ -86,20 +94,19 @@ func TestRecoverSegments(t *testing.T) {
 		segmentTargetSize = 10 * 1024
 		segmentBufferSize = 1024
 	)
-	filelog, err := NewFileLog(filesys, "", segmentTargetSize, segmentBufferSize)
+	filelog, err := NewFileLog(filesys, "", segmentTargetSize, segmentBufferSize, nil)
 	if err != nil {
 		t.Fatalf("NewFileLog: %v", err)
 	}
 	defer filelog.Close()
 
-	files := map[string]bool{
-		// file                  expected
-		lockFile:                true,
-		"ACTIVE." + extFlushed:  true,
-		"FLUSHED." + extFlushed: true,
-		"READING." + extFlushed: true,
-		"TRASHED." + extTrashed: true,
-		"IGNORED.ignored":       true,
+	files := map[string]bool{ // file: expected
+		"01ARYZ6S41TSV4RRFFQ69G5FAV-01ARYZ6S41TSV4RRFFZZZZZZZZ" + extFlushed: true,
+		"FLUSHED" + extFlushed:                                               true,
+		"READING" + extFlushed:                                               true,
+		"TRASHED" + extTrashed:                                               true,
+		"IGNORED.ignored":                                                    true,
+		lockFile:                                                             true,
 	}
 	filesys.Walk("", func(path string, info os.FileInfo, err error) error {
 		if _, ok := files[path]; ok {
@@ -125,7 +132,7 @@ func TestLockBehavior(t *testing.T) {
 	root := filepath.Join("testdata", "TestStaleLockSucceeds")
 	for name, factory := range map[string]func() fs.Filesystem{
 		"virtual": fs.NewVirtualFilesystem,
-		"real":    func() fs.Filesystem { return fs.NewRealFilesystem(false) },
+		"real":    fs.NewRealFilesystem,
 	} {
 		t.Run(name, func(t *testing.T) {
 			// Generate a filesystem and rootpath.
@@ -143,18 +150,59 @@ func TestLockBehavior(t *testing.T) {
 			f.Close()
 
 			// NewFileLog should manage this fine.
-			filelog, err := NewFileLog(filesys, root, 1024, 1024)
+			filelog, err := NewFileLog(filesys, root, 1024, 1024, nil)
 			if err != nil {
 				t.Fatalf("initial NewFileLog: %v", err)
 			}
 
 			// But a second FileLog should fail.
-			if _, err := NewFileLog(filesys, root, 1024, 1024); err == nil {
+			if _, err := NewFileLog(filesys, root, 1024, 1024, nil); err == nil {
 				t.Fatalf("second NewFileLog: want error, have none")
 			} else {
 				t.Logf("second NewFileLog: got expected error: %v", err)
 			}
 			filelog.Close()
 		})
+	}
+}
+
+func TestBadSegment(t *testing.T) {
+	t.Parallel()
+
+	// Create some filenames.
+	var (
+		t0        = time.Now().Add(-time.Minute)
+		entropy   = rand.New(rand.NewSource(7))
+		mktime    = func(i int) time.Time { return t0.Add(time.Duration(i) * time.Second) }
+		mkulid    = func(i int) ulid.ULID { return ulid.MustNew(ulid.Timestamp(mktime(i)), entropy) }
+		mkulidstr = func(i int) string { return mkulid(i).String() }
+		goodfile1 = fmt.Sprintf("%s-%s%s", mkulidstr(0), mkulidstr(3), extFlushed)
+		goodfile2 = fmt.Sprintf("%s-%s%s", mkulidstr(1), mkulidstr(5), extFlushed)
+		badfile   = fmt.Sprintf("%s-%s%s", mkulidstr(2), "xxx", extFlushed)
+	)
+
+	// Populate a filesys with those files.
+	filesys := fs.NewVirtualFilesystem()
+	for _, filename := range []string{goodfile1, goodfile2, badfile} {
+		f, _ := filesys.Create("/" + filename)
+		f.Close()
+	}
+
+	// Create a filelog around that filesys.
+	filelog, _ := NewFileLog(filesys, "/", 1024, 1024, nil)
+
+	// Perform some read op on the filelog, to trigger rm.
+	// Main thing here is just that it doesn't panic.
+	filelog.Overlapping()
+
+	// Hopefully we've eliminated the bad file.
+	// TODO(pb): in the future, write some valid entries and test they're recovered somewhere
+	found := map[string]bool{}
+	filesys.Walk("/", func(path string, info os.FileInfo, err error) error {
+		found[filepath.Base(path)] = true
+		return nil
+	})
+	if _, ok := found[badfile]; ok {
+		t.Fatalf("%s wasn't deleted", badfile)
 	}
 }

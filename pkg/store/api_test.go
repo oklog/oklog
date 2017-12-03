@@ -20,6 +20,8 @@ import (
 )
 
 func TestTeeRecords(t *testing.T) {
+	t.Parallel()
+
 	var records = []string{
 		"01BB6RQR190000000000000000 Foo\n",
 		"01BB6RRTB70000000000000000 Bar\n",
@@ -56,6 +58,8 @@ func TestTeeRecords(t *testing.T) {
 }
 
 func TestAPIInternalQueryFromULID(t *testing.T) {
+	t.Parallel()
+
 	a, err := newFixtureAPI(t)
 	if err != nil {
 		t.Fatal(err)
@@ -96,9 +100,16 @@ var (
 )
 
 func newFixtureAPI(t *testing.T) (*API, error) {
+	// Loggers.
+	var (
+		baseLogger  = log.NewLogfmtLogger(os.Stderr)
+		logReporter = LogReporter{log.With(baseLogger, "component", "FileLog")}
+		apiReporter = LogReporter{log.With(baseLogger, "component", "API")}
+	)
+
 	// Construct a virtual file log.
 	filesys := fs.NewVirtualFilesystem()
-	filelog, err := NewFileLog(filesys, "/", 10240, 1024)
+	filelog, err := NewFileLog(filesys, "/", 10240, 1024, logReporter)
 	if err != nil {
 		return nil, err
 	}
@@ -111,8 +122,7 @@ func newFixtureAPI(t *testing.T) (*API, error) {
 		replicatedSegments = prometheus.NewCounter(prometheus.CounterOpts{})
 		replicatedBytes    = prometheus.NewCounter(prometheus.CounterOpts{})
 		duration           = prometheus.NewHistogramVec(prometheus.HistogramOpts{}, []string{"method", "path", "status_code"})
-		logger             = log.NewLogfmtLogger(os.Stderr)
-		a                  = NewAPI(peer, filelog, queryClient, streamClient, replicatedSegments, replicatedBytes, duration, logger)
+		a                  = NewAPI(peer, filelog, queryClient, streamClient, replicatedSegments, replicatedBytes, duration, apiReporter)
 	)
 
 	// Populate the store via the replicate API.
@@ -125,6 +135,12 @@ func newFixtureAPI(t *testing.T) (*API, error) {
 			return nil, fmt.Errorf("Replicate %d failed: HTTP %d (%s)", i, w.Code, strings.TrimSpace(w.Body.String()))
 		}
 	}
+
+	// Debug: dump the filesys.
+	filesys.Walk("/", func(path string, info os.FileInfo, err error) error {
+		t.Logf("Debug: Walk: %s (%dB)", path, info.Size())
+		return nil
+	})
 
 	// Return the populated API.
 	return a, nil
