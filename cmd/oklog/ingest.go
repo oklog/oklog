@@ -52,7 +52,7 @@ func runIngest(args []string) error {
 		segmentFlushSize      = flagset.Int("ingest.segment-flush-size", defaultIngestSegmentFlushSize, "flush segments after they grow to this size")
 		segmentFlushAge       = flagset.Duration("ingest.segment-flush-age", defaultIngestSegmentFlushAge, "flush segments after they are active for this long")
 		segmentPendingTimeout = flagset.Duration("ingest.segment-pending-timeout", defaultIngestSegmentPendingTimeout, "claimed but uncommitted pending segments are failed after this long")
-		filesystem            = flagset.String("filesystem", defaultFilesystem, "real, real-mmap, virtual, nop")
+		filesystem            = flagset.String("filesystem", defaultFilesystem, "real, virtual, nop")
 		clusterPeers          = stringslice{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
