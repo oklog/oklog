@@ -201,6 +201,8 @@ func runIngest(args []string) error {
 		level.Warn(logger).Log("err", "this node advertises itself on an unroutable address", "addr", addr.String())
 		level.Warn(logger).Log("err", "this node will be unreachable in the cluster")
 		level.Warn(logger).Log("err", "provide -cluster.advertise-addr as a routable IP address or hostname")
+	} else {
+		level.Debug(logger).Log("calculated_advertise_addr", addr, "note", "this is our best guess")
 	}
 
 	// Bind listeners.
