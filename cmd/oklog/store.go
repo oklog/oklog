@@ -52,8 +52,8 @@ func runStore(args []string) error {
 		segmentReplicationFactor = flagset.Int("store.segment-replication-factor", defaultStoreSegmentReplicationFactor, "how many copies of each segment to replicate")
 		segmentRetain            = flagset.Duration("store.segment-retain", defaultStoreSegmentRetain, "retention period for segment files")
 		segmentPurge             = flagset.Duration("store.segment-purge", defaultStoreSegmentPurge, "purge deleted segment files after this long")
-		uiLocal                  = flagset.Bool("ui.local", false, "Ignores embedded files and goes straight to the filesystem")
-		filesystem               = flagset.String("filesystem", defaultFilesystem, "real, real-mmap, virtual, nop")
+		uiLocal                  = flagset.Bool("ui.local", false, "ignore embedded files and go straight to the filesystem")
+		filesystem               = flagset.String("filesystem", defaultFilesystem, "real, virtual, nop")
 		clusterPeers             = stringslice{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
