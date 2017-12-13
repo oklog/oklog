@@ -178,6 +178,9 @@ func runStore(args []string) error {
 	}
 	level.Info(logger).Log("user_bind_host", clusterBindHost, "user_advertise_host", clusterAdvertiseHost, "calculated_advertise_ip", advertiseIP)
 	clusterAdvertiseHost = advertiseIP.String()
+	if clusterAdvertisePort == 0 {
+		clusterAdvertisePort = clusterBindPort
+	}
 
 	// Bind listeners.
 	apiListener, err := net.Listen(apiNetwork, apiAddress)
