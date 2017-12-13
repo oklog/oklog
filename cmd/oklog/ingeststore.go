@@ -242,15 +242,21 @@ func runIngestStore(args []string) error {
 		level.Info(logger).Log("cluster_advertise", fmt.Sprintf("%s:%d", clusterAdvertiseHost, clusterAdvertisePort))
 	}
 
-	// Safety warning.
-	if addr, err := cluster.CalculateAdvertiseAddress(clusterBindHost, clusterAdvertiseHost); err != nil {
-		level.Warn(logger).Log("err", "couldn't deduce an advertise address: "+err.Error())
-	} else if hasNonlocal(clusterPeers) && isUnroutable(addr.String()) {
-		level.Warn(logger).Log("err", "this node advertises itself on an unroutable address", "addr", addr.String())
+	// Calculate an advertise IP.
+	advertiseIP, err := cluster.CalculateAdvertiseIP(clusterBindHost, clusterAdvertiseHost, net.DefaultResolver, logger)
+	if err != nil {
+		level.Error(logger).Log("err", "couldn't deduce an advertise IP: "+err.Error())
+		return err
+	}
+	if hasNonlocal(clusterPeers) && isUnroutable(advertiseIP.String()) {
+		level.Warn(logger).Log("err", "this node advertises itself on an unroutable IP", "ip", advertiseIP.String())
 		level.Warn(logger).Log("err", "this node will be unreachable in the cluster")
 		level.Warn(logger).Log("err", "provide -cluster.advertise-addr as a routable IP address or hostname")
-	} else {
-		level.Debug(logger).Log("calculated_advertise_addr", addr, "note", "this is our best guess")
+	}
+	level.Info(logger).Log("user_bind_host", clusterBindHost, "user_advertise_host", clusterAdvertiseHost, "calculated_advertise_ip", advertiseIP)
+	clusterAdvertiseHost = advertiseIP.String()
+	if clusterAdvertisePort == 0 {
+		clusterAdvertisePort = clusterBindPort
 	}
 
 	// Bind listeners.

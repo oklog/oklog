@@ -1,8 +1,19 @@
 package cluster
 
-import "testing"
+import (
+	"context"
+	"fmt"
+	"net"
+	"testing"
+
+	"github.com/go-kit/kit/log"
+)
 
 func TestCalculateAdvertiseAddr(t *testing.T) {
+	r := mockResolver{
+		"validhost.com": []net.IPAddr{{IP: net.ParseIP("10.21.32.43")}},
+		"multihost.com": []net.IPAddr{{IP: net.ParseIP("10.1.0.1")}, {IP: net.ParseIP("10.1.0.2")}},
+	}
 	for _, testcase := range []struct {
 		name          string
 		bindAddr      string
@@ -30,9 +41,15 @@ func TestCalculateAdvertiseAddr(t *testing.T) {
 		{"IPv6 bind private advertise",
 			"::", "172.16.1.1", "172.16.1.1",
 		},
+		{"Valid hostname as bind addr",
+			"validhost.com", "", "10.21.32.43",
+		},
+		{"Valid hostname as advertise addr",
+			"0.0.0.0", "validhost.com", "10.21.32.43",
+		},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
-			ip, err := CalculateAdvertiseAddress(testcase.bindAddr, testcase.advertiseAddr)
+			ip, err := CalculateAdvertiseIP(testcase.bindAddr, testcase.advertiseAddr, r, log.NewNopLogger())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -41,4 +58,13 @@ func TestCalculateAdvertiseAddr(t *testing.T) {
 			}
 		})
 	}
+}
+
+type mockResolver map[string][]net.IPAddr
+
+func (r mockResolver) LookupIPAddr(_ context.Context, address string) ([]net.IPAddr, error) {
+	if ips, ok := r[address]; ok {
+		return ips, nil
+	}
+	return nil, fmt.Errorf("address not found")
 }
