@@ -20,6 +20,11 @@ type PeerFactory func() []string
 // Other errors will cause the managing goroutine to remanufacture.
 type ReadCloserFactory func(context.Context, string) (io.ReadCloser, error)
 
+type canceldone struct {
+	cancel func()
+	done   <-chan struct{}
+}
+
 // Execute creates and maintains streams of records to multiple peers.
 // It muxes the streams to the returned chan of records.
 // The chan will be closed when the context is canceled.
@@ -37,11 +42,11 @@ func Execute(
 ) <-chan []byte {
 	// Make the sink chan of records.
 	// TODO(pb): validate the buffer size
-	c := make(chan []byte, 1024)
+	sink := make(chan []byte, 1024)
 
 	// Invoke the PeerFactory to get the initial addrs.
 	// Initialize connection managers to each of them.
-	active := updateActive(ctx, nil, pf(), rcf, c, sleep)
+	active := updateActive(ctx, nil, pf(), rcf, sink, sleep)
 
 	go func() {
 		// Re-invoke the peerFactory every second.
@@ -54,52 +59,62 @@ func Execute(
 			case <-tk.C:
 				// Detect new peers, and create connection managers for them.
 				// Terminate connection managers for peers that have gone away.
-				active = updateActive(ctx, active, pf(), rcf, c, sleep)
+				active = updateActive(ctx, active, pf(), rcf, sink, sleep)
 
 			case <-ctx.Done():
 				// Context cancelation is transitive.
-				// We just need to exit.
-				close(c)
+				// We just need to wait.
+				for _, cd := range active {
+					<-cd.done
+				}
+				close(sink)
 				return
 			}
 		}
 	}()
 
-	return c
+	return sink
 }
 
 func updateActive(
 	parent context.Context,
-	prevgen map[string]func(),
+	prevgen map[string]canceldone,
 	addrs []string,
 	rcf ReadCloserFactory,
 	sink chan<- []byte,
 	sleep func(time.Duration),
-) map[string]func() {
+) map[string]canceldone {
 	// Create the "new" collection of peer managers.
 	// Really, we just have to track the cancel func.
-	nextgen := map[string]func(){}
+	nextgen := map[string]canceldone{}
 
 	// The addrs represent all the connections we *should* have.
 	for _, addr := range addrs {
-		if cancel, ok := prevgen[addr]; ok {
+		if cd, ok := prevgen[addr]; ok {
 			// This addr already exists in our previous collection.
 			// Just move its cancel func over to the new collection.
-			nextgen[addr] = cancel
+			nextgen[addr] = cd
 			delete(prevgen, addr)
 		} else {
 			// This addr appears to be new!
 			// Create a new connection manager for it.
-			ctx, cancel := context.WithCancel(parent)
-			go readUntilCanceled(ctx, rcf, addr, sink, sleep)
-			nextgen[addr] = cancel
+			var (
+				ctx, cancel = context.WithCancel(parent)
+				done        = make(chan struct{})
+			)
+			go func(addr string) {
+				readUntilCanceled(ctx, rcf, addr, sink, sleep)
+				close(done)
+			}(addr)
+			nextgen[addr] = canceldone{cancel, done}
 		}
 	}
 
 	// All the addrs left over in the previous collection are gone.
 	// Their connection managers should be canceled.
-	for _, cancel := range prevgen {
-		cancel()
+	for _, cd := range prevgen {
+		cd.cancel()
+		<-cd.done
 	}
 
 	// Good to go.
