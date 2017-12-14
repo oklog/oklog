@@ -88,37 +88,25 @@ func TestReadUntilCanceled(t *testing.T) {
 }
 
 func TestIssue59(t *testing.T) {
-	// Make two sources.
-	rcf := func(_ context.Context, peer string) (io.ReadCloser, error) {
-		switch peer {
-		case "a":
-			return infiniteReader("alpha"), nil
-		case "b":
-			return infiniteReader("beta"), nil
-		default:
-			panic("invalid peer")
-		}
-	}
-
-	// Start Execute, streaming from the two sources.
+	// Start Execute, streaming from some infinite sources.
 	var (
 		ctx, cancel = context.WithCancel(context.Background())
-		pf          = func() []string { return []string{"a", "b"} }
-		sleep       = func(time.Duration) {}
-		tickc       = make(chan time.Time)
-		ticker      = func(time.Duration) *time.Ticker { return &time.Ticker{C: tickc} }
+		pf          = func() []string { return []string{"alpha", "bravo", "charlie"} }
+		rcf         = func(_ context.Context, peer string) (io.ReadCloser, error) { return infiniteReader(peer), nil }
+		sleep       = func(time.Duration) {} // no sleep
+		ticker      = time.NewTicker
 		sink        = Execute(ctx, pf, rcf, sleep, ticker)
 	)
 
 	// Drain the records as quickly as possible.
 	var (
-		draincomplete = make(chan struct{})
-		drainrecords  = 0
+		done  = make(chan struct{})
+		count = 0
 	)
 	go func() {
-		defer close(draincomplete)
+		defer close(done)
 		for range sink {
-			drainrecords++
+			count++
 		}
 	}()
 
@@ -126,8 +114,8 @@ func TestIssue59(t *testing.T) {
 	begin := time.Now()
 	time.Sleep(100 * time.Millisecond)
 	cancel()
-	<-draincomplete
-	t.Logf("drained %d in %s", drainrecords, time.Since(begin))
+	<-done
+	t.Logf("drained %d in %s", count, time.Since(begin))
 }
 
 type ctxReader struct {
