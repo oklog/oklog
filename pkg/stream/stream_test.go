@@ -87,6 +87,49 @@ func TestReadUntilCanceled(t *testing.T) {
 	}
 }
 
+func TestIssue59(t *testing.T) {
+	// Make two sources.
+	rcf := func(_ context.Context, peer string) (io.ReadCloser, error) {
+		switch peer {
+		case "a":
+			return infiniteReader("alpha"), nil
+		case "b":
+			return infiniteReader("beta"), nil
+		default:
+			panic("invalid peer")
+		}
+	}
+
+	// Start Execute, streaming from the two sources.
+	var (
+		ctx, cancel = context.WithCancel(context.Background())
+		pf          = func() []string { return []string{"a", "b"} }
+		sleep       = func(time.Duration) {}
+		tickc       = make(chan time.Time)
+		ticker      = func(time.Duration) *time.Ticker { return &time.Ticker{C: tickc} }
+		sink        = Execute(ctx, pf, rcf, sleep, ticker)
+	)
+
+	// Drain the records as quickly as possible.
+	var (
+		draincomplete = make(chan struct{})
+		drainrecords  = 0
+	)
+	go func() {
+		defer close(draincomplete)
+		for range sink {
+			drainrecords++
+		}
+	}()
+
+	// Run it awhile, then cancel.
+	begin := time.Now()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-draincomplete
+	t.Logf("drained %d in %s", drainrecords, time.Since(begin))
+}
+
 type ctxReader struct {
 	ctx context.Context
 	rec []byte
@@ -106,3 +149,11 @@ func (r *ctxReader) Read(p []byte) (int, error) {
 }
 
 func (*ctxReader) Close() error { return nil }
+
+type infiniteReader string
+
+func (r infiniteReader) Read(p []byte) (int, error) {
+	return copy(p, []byte(string(r)+"\n")), nil
+}
+
+func (r infiniteReader) Close() error { return nil }
