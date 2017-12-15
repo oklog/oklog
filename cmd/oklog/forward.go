@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
+	"github.com/oklog/oklog/pkg/forward"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -21,9 +22,11 @@ import (
 func runForward(args []string) error {
 	flagset := flag.NewFlagSet("forward", flag.ExitOnError)
 	var (
-		debug    = flagset.Bool("debug", false, "debug logging")
-		apiAddr  = flagset.String("api", "", "listen address for forward API (and metrics)")
-		prefixes = stringslice{}
+		debug        = flagset.Bool("debug", false, "debug logging")
+		apiAddr      = flagset.String("api", "", "listen address for forward API (and metrics)")
+		prefixes     = stringslice{}
+		backpressure = flagset.String("backpressure", "block", "block, buffer")
+		bufferSize   = flagset.Int("buffer-size", 1024, "in -backpressure=buffer mode, ringbuffer size in records")
 	)
 	flagset.Var(&prefixes, "prefix", "prefix annotated on each log record (repeatable)")
 	flagset.Usage = usageFor(flagset, "oklog forward [flags] <ingester> [<ingester>...]")
@@ -123,14 +126,31 @@ func runForward(args []string) error {
 		urls[i], urls[j] = urls[j], urls[i]
 	}
 
+	// textScanner encapsulates bufio.Scanner in a single method, so we can provide
+	// a straightforward alternate implementation.
+	type textScanner interface {
+		Next() (bool, string, error)
+	}
+
 	// Build a scanner for the input, and the last record we scanned.
 	// These both outlive any individual connection to an ingester.
-	// TODO(pb): have flag for backpressure vs. drop
 	var (
-		s       = bufio.NewScanner(os.Stdin)
+		s       textScanner
 		backoff = time.Duration(0)
 	)
-
+	switch strings.ToLower(*backpressure) {
+	case "block":
+		bs := bufio.NewScanner(os.Stdin)
+		bios := bufioScanner{bs}
+		s = &bios
+	case "buffer":
+		rb := forward.NewBufferedScanner(forward.NewRingBuffer(*bufferSize))
+		go rb.Consume(os.Stdin)
+		s = rb
+	default:
+		level.Error(logger).Log("backpressure", *backpressure, "err", "invalid backpressure option")
+		os.Exit(1)
+	}
 	// Enter the connect and forward loop. We do this forever.
 	for ; ; urls = append(urls[1:], urls[0]) { // rotate thru URLs
 		// We gonna try to connect to this first one.
@@ -194,10 +214,9 @@ func runForward(args []string) error {
 			continue
 		}
 
-		ok := s.Scan()
+		ok, record, err := s.Next()
 		for ok {
 			// We enter the loop wanting to write s.Text() to the conn.
-			record := s.Text()
 			if n, err := fmt.Fprintf(conn, "%s%s\n", prefix, record); err != nil {
 				disconnects.Inc()
 				level.Warn(logger).Log("disconnected_from", target.String(), "due_to", err)
@@ -212,13 +231,23 @@ func runForward(args []string) error {
 			backoff = 0 // reset the backoff on a successful write
 			forwardBytes.Add(float64(len(record)) + 1)
 			forwardRecords.Inc()
-			ok = s.Scan()
+			ok, record, err = s.Next()
 		}
 		if !ok {
-			level.Info(logger).Log("stdin", "exhausted", "due_to", s.Err())
+			level.Info(logger).Log("stdin", "exhausted", "due_to", err)
 			return nil
 		}
 	}
+}
+
+// bufioScanner implements a simpler API for our use-case
+type bufioScanner struct {
+	*bufio.Scanner
+}
+
+func (bs *bufioScanner) Next() (bool, string, error) {
+	t := bs.Scanner.Scan()
+	return t, bs.Scanner.Text(), bs.Scanner.Err()
 }
 
 func exponential(d time.Duration) time.Duration {
