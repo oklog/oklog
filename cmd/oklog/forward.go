@@ -197,7 +197,6 @@ func runForward(args []string) error {
 		ok := s.Scan()
 		for ok {
 			// We enter the loop wanting to write s.Text() to the conn.
-			//record := s.Text()
 			record := fmt.Sprintf("%s%s\n", prefix, s.Text())
 			if n, err := fmt.Fprintf(conn, record); err != nil {
 				disconnects.Inc()
