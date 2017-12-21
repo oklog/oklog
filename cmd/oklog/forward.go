@@ -210,7 +210,7 @@ func runForward(args []string) error {
 
 			// Only once the write succeeds do we scan the next record.
 			backoff = 0 // reset the backoff on a successful write
-			forwardBytes.Add(float64(len(record)) + 1)
+			forwardBytes.Add(float64(len(record)))
 			forwardRecords.Inc()
 			ok = s.Scan()
 		}
