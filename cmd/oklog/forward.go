@@ -197,20 +197,20 @@ func runForward(args []string) error {
 		ok := s.Scan()
 		for ok {
 			// We enter the loop wanting to write s.Text() to the conn.
-			record := s.Text()
-			if n, err := fmt.Fprintf(conn, "%s%s\n", prefix, record); err != nil {
+			record := fmt.Sprintf("%s%s\n", prefix, s.Text())
+			if n, err := fmt.Fprintf(conn, record); err != nil {
 				disconnects.Inc()
 				level.Warn(logger).Log("disconnected_from", target.String(), "due_to", err)
 				break
-			} else if n < len(record)+1 {
+			} else if n < len(record) {
 				shortWrites.Inc()
-				level.Warn(logger).Log("short_write_to", target.String(), "n", n, "less_than", len(record)+1)
+				level.Warn(logger).Log("short_write_to", target.String(), "n", n, "less_than", len(record))
 				break // TODO(pb): we should do something more sophisticated here
 			}
 
 			// Only once the write succeeds do we scan the next record.
 			backoff = 0 // reset the backoff on a successful write
-			forwardBytes.Add(float64(len(record)) + 1)
+			forwardBytes.Add(float64(len(record)))
 			forwardRecords.Inc()
 			ok = s.Scan()
 		}
