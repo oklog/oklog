@@ -410,7 +410,8 @@ func recoverSegments(filesys fs.Filesystem, root string) error {
 		}
 		var (
 			oldname = path
-			newname = fmt.Sprintf("%s-%s%s", lo, hi, extFlushed)
+			oldpath = filepath.Dir(oldname)
+			newname = filepath.Join(oldpath, fmt.Sprintf("%s-%s%s", lo, hi, extFlushed))
 		)
 		if err := filesys.Rename(oldname, newname); err != nil {
 			return err
