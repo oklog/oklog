@@ -89,6 +89,7 @@ func runForward(args []string) error {
 			mux := http.NewServeMux()
 			registerMetrics(mux)
 			registerProfile(mux)
+			registerHealthCheck(mux)
 			panic(http.Serve(apiListener, mux))
 		}()
 	}

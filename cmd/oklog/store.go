@@ -321,6 +321,7 @@ func runStore(args []string) error {
 			mux.Handle("/ui/", ui.NewAPI(logger, *uiLocal))
 			registerMetrics(mux)
 			registerProfile(mux)
+			registerHealthCheck(mux)
 			return http.Serve(apiListener, cors.Default().Handler(mux))
 		}, func(error) {
 			apiListener.Close()

@@ -337,6 +337,7 @@ func runIngest(args []string) error {
 			)))
 			registerMetrics(mux)
 			registerProfile(mux)
+			registerHealthCheck(mux)
 			return http.Serve(apiListener, cors.Default().Handler(mux))
 		}, func(error) {
 			apiListener.Close()
