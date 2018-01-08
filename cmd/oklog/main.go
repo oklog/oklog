@@ -142,6 +142,13 @@ func parseAddr(addr string, defaultPort int) (network, address, host string, por
 	return u.Scheme, u.Host, host, port, nil
 }
 
+func registerHealthCheck(mux *http.ServeMux) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "OK")
+	})
+}
+
 func registerMetrics(mux *http.ServeMux) {
 	mux.Handle("/metrics", promhttp.Handler())
 }
