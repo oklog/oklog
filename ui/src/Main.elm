@@ -300,7 +300,7 @@ getStats now query =
         , method = "HEAD"
         , timeout = Nothing
         , url = queryUrl now query
-        , withCredentials = False
+        , withCredentials = True
         }
         |> send StatsUpdate
 
