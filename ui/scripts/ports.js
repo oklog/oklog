@@ -63,7 +63,8 @@
 		}
 
 		fetch(url, {
-			method: "GET"
+			method: "GET",
+			credentials: "include"
 		}).then(function(response) {
 			stream = response.body.getReader();
 
