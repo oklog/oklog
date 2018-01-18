@@ -250,7 +250,7 @@ queryUrl now query =
             Http.encodeUri (RFC3339.encode (fromTime now))
 
         parts =
-            [ "/store/query?from="
+            [ "../store/query?from="
             , from
             , "&to="
             , to
@@ -268,7 +268,7 @@ streamUrl : Query -> String
 streamUrl query =
     let
         parts =
-            [ "/store/stream?"
+            [ "../store/stream?"
             , "&q="
             , query.term
             ]

@@ -21,5 +21,5 @@ func NewAPI(logger log.Logger, local bool) *API {
 }
 
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	http.FileServer(FS(a.local)).ServeHTTP(w, r)
+	http.FileServer(_escFS(a.local)).ServeHTTP(w, r)
 }
