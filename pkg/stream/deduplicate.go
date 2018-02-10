@@ -1,8 +1,6 @@
 package stream
 
 import (
-	"bytes"
-	"fmt"
 	"time"
 
 	"github.com/google/btree"
@@ -18,7 +16,10 @@ func Deduplicate(in <-chan []byte, window time.Duration, ticker func(time.Durati
 	out := make(chan []byte, 1024) // TODO(pb): validate buffer size
 	go func() {
 		var (
-			d  = dedupe{BTree: btree.New(2)}
+			d = dedupe{
+				BTree:         btree.New(2),
+				ulidRecordmap: map[WrapULID][]byte{},
+			}
 			tk = ticker(window / 10)
 		)
 		defer tk.Stop()
@@ -39,38 +40,44 @@ func Deduplicate(in <-chan []byte, window time.Duration, ticker func(time.Durati
 	return out
 }
 
-type dedupe struct{ *btree.BTree }
+type dedupe struct {
+	*btree.BTree
+	ulidRecordmap map[WrapULID][]byte // map[ulid]record && no race
+}
 
 func (d dedupe) insert(record []byte) {
-	d.BTree.ReplaceOrInsert(item(record))
+	if len(record) <= ulid.EncodedSize {
+		panic("invalid record")
+	}
+	var node ulid.ULID
+	node.UnmarshalText(record[:ulid.EncodedSize])
+	d.BTree.ReplaceOrInsert(WrapULID{node})
+	d.ulidRecordmap[WrapULID{node}] = record
 }
 
 func (d dedupe) remove(olderThan time.Time, dst chan<- []byte) {
 	var (
-		pivot, _ = ulid.MustNew(ulid.Timestamp(olderThan), nil).MarshalText()
-		toEmit   [][]byte
+		pivot  = ulid.MustNew(ulid.Timestamp(olderThan), nil)
+		toEmit []WrapULID
 	)
-	d.BTree.AscendLessThan(item(pivot), func(i btree.Item) bool {
+	d.BTree.AscendLessThan(WrapULID{pivot}, func(i btree.Item) bool {
 		// Unfortunately, can't mutate the tree during iteration.
-		toEmit = append(toEmit, i.(item))
+		toEmit = append(toEmit, i.(WrapULID))
 		return true
 	})
-	for _, record := range toEmit {
-		dst <- record
-		d.BTree.Delete(item(record))
+	for _, node := range toEmit {
+		dst <- d.ulidRecordmap[node]
+		d.BTree.Delete(node)
 	}
 }
 
-type item []byte
+type WrapULID struct {
+	ulid.ULID
+}
 
-func (i item) Less(other btree.Item) bool {
-	otherItem := other.(item)
-	if len(i) < ulid.EncodedSize || len(otherItem) < ulid.EncodedSize {
-		panic(fmt.Sprintf("invalid record given to deduplicator: %q v %q", string(i), string(otherItem)))
+func (w WrapULID) Less(other btree.Item) bool {
+	if w.Compare(other.(WrapULID).ULID) < 0 {
+		return true
 	}
-
-	// We rely on the BTree itself to deduplicate. From the docs:
-	// "If !a.Less(b) && !b.Less(a), we treat this to mean a == b."
-	// So make sure to return false when bytes.Compare == 0.
-	return bytes.Compare(i[:ulid.EncodedSize], otherItem[:ulid.EncodedSize]) < 0
+	return false
 }

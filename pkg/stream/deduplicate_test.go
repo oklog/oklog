@@ -9,6 +9,36 @@ import (
 	"github.com/oklog/ulid"
 )
 
+func Benchmark_Deduplicate(t *testing.B) {
+
+	var (
+		in     = make(chan []byte)
+		tick   = make(chan time.Time)
+		ticker = func(time.Duration) *time.Ticker { return &time.Ticker{C: tick} }
+		window = 10 * time.Second
+		out    = Deduplicate(in, window, ticker)
+		count  = 900000000
+		rec    []byte
+		record string = `[FREEGO_WORK ] {"module":"gateway","level":"error","client":"","token":"","traceid":"-","rpcid":"0","tracetag":0,"servicefrom":17,"serviceto":0,"ipfrom":"","ipto":"","timestamp":"2018-02-10T12:27:55+08:00","interval":0,"file":"handler.go","line":293,"cnt":"调用服务时返回错误: {\"data\":{\"battery_buzz_light\":false},\"errors\":[{\"code\":50004,\"message\":\"内部微服务调用失败\"}]}","consoleinfo":{"phone":"18837058255","userid":"cn_admin_users_1518079483_c0eed8c2-bbe0-46da-bbcb-010d2988624a","client":"-"}}`
+	)
+	go func() {
+		for i := 0; i < count; i++ {
+			//time.Sleep(time.Millisecond)
+			rec = []byte(fmt.Sprintf("%s %s", ulid.MustNew(ulid.Timestamp(time.Now()), nil).String(), record))
+			in <- rec
+		}
+	}()
+	// We haven't ticked the ticker yet, so no records can emerge.
+	for i := 0; i < count; i++ {
+		select {
+		case record := <-out:
+			t.Fatalf("unexpected record: %q", record)
+		default:
+			// good
+		}
+	}
+}
+
 func TestDeduplicate(t *testing.T) {
 	t.Parallel()
 
