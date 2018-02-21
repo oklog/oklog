@@ -184,8 +184,8 @@
 [[projects]]
   name = "github.com/prometheus/prometheus"
   packages = ["pkg/labels","storage","storage/tsdb","util/testutil"]
-  revision = "0a74f98628a0463dddc90528220c94de5032d1a0"
-  version = "v2.0.0"
+  revision = "85f23d82a045d103ea7f3c89a91fba4a93e6367a"
+  version = "v2.1.0"
 
 [[projects]]
   branch = "master"
@@ -232,6 +232,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "d1b5ad2e0d78aa22e547e31d0d9f29d53c314caf36c430224e4e7a141fff25ee"
+  inputs-digest = "a2bd5e34e33089f07456e9a837d665ba8543d36fd472e57dc298fa1d26d2ad20"
   solver-name = "gps-cdcl"
   solver-version = 1
