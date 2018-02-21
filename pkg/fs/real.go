@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/prometheus/prometheus/util/flock"
+	"github.com/oklog/oklog/pkg/flock"
 )
 
 const mkdirAllMode = 0755
