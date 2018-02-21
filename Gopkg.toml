@@ -45,7 +45,7 @@
 
 [[constraint]]
   name = "github.com/prometheus/prometheus"
-  version = "2.0.0"
+  version = "2.1.0"
 
 [[constraint]]
   name = "github.com/rs/cors"

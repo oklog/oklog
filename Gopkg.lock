@@ -14,6 +14,12 @@
   revision = "4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9"
 
 [[projects]]
+  name = "github.com/cespare/xxhash"
+  packages = ["."]
+  revision = "5c37fe3735342a2e0d01c87a907579987c8936cc"
+  version = "v1.0.0"
+
+[[projects]]
   name = "github.com/djherbis/buffer"
   packages = [".","limio","wrapio"]
   revision = "4972e2bf4a27dbd7c43140c959b85e8c1d2f5536"
@@ -116,6 +122,12 @@
   revision = "6da3249dfb57fbaa16efafcd8744cee8809d80cd"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/nightlyone/lockfile"
+  packages = ["."]
+  revision = "6a197d5ea61168f2ac821de2b7f011b250904900"
+
+[[projects]]
   name = "github.com/oklog/run"
   packages = ["."]
   revision = "4dadeb3030eda0273a12382bb2348ffc7c9d1a39"
@@ -171,9 +183,15 @@
 
 [[projects]]
   name = "github.com/prometheus/prometheus"
-  packages = ["util/flock"]
-  revision = "0a74f98628a0463dddc90528220c94de5032d1a0"
-  version = "v2.0.0"
+  packages = ["pkg/labels","storage","storage/tsdb","util/testutil"]
+  revision = "85f23d82a045d103ea7f3c89a91fba4a93e6367a"
+  version = "v2.1.0"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/prometheus/tsdb"
+  packages = [".","chunkenc","chunks","fileutil","index","labels"]
+  revision = "494acd307058387ced7646f9996b0f7372eaa558"
 
 [[projects]]
   name = "github.com/rs/cors"
@@ -193,9 +211,27 @@
   packages = ["ed25519","ed25519/internal/edwards25519"]
   revision = "94eea52f7b742c7cbe0b03b22f0c4c8631ece122"
 
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/net"
+  packages = ["context"]
+  revision = "cbe0f9307d0156177f9dd5dc85da1a31abc5f2fb"
+
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/sync"
+  packages = ["errgroup"]
+  revision = "fd80eb99c8f653c847d294a001bdf2a3a6f768f5"
+
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/sys"
+  packages = ["unix"]
+  revision = "37707fdb30a5b38865cfb95e5aab41707daec7fd"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "504381757eb2475bbf34e33ff11c7a4eb32896fbed16206f877ed7399b650bce"
+  inputs-digest = "a2bd5e34e33089f07456e9a837d665ba8543d36fd472e57dc298fa1d26d2ad20"
   solver-name = "gps-cdcl"
   solver-version = 1
