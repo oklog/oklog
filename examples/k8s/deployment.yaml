@@ -1,0 +1,58 @@
+---
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: oklog
+  labels:
+    app: oklog
+spec:
+  replicas: 1
+  serviceName: "oklog"
+  selector:
+    matchLabels:
+      app: oklog
+  template:
+    metadata:
+      name: oklog
+      labels:
+        app: oklog
+    spec:
+      containers:
+      - name: oklog
+        image: zvelo/oklog:latest
+        imagePullPolicy: Always
+        ports:
+          - name: api
+            containerPort: 7650
+          - name: ingest-fast
+            containerPort: 7651
+          - name: ingest-durable
+            containerPort: 7652
+          - name: ingest-bulk
+            containerPort: 7653
+          - name: cluster
+            containerPort: 7659
+        args:
+          - ingeststore
+          - -store.segment-replication-factor
+          - "1"
+          - -store.segment-retain
+          - 30m
+          - -store.segment-purge
+          - 5m
+          - -store.path
+          - /data/store
+          - -ingest.path
+          - /data/ingest
+        volumeMounts:
+          - name: oklog
+            mountPath: /data
+  volumeClaimTemplates:
+  - metadata:
+      name: oklog
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: gp2
+      resources:
+        requests:
+          storage: 10Gi
