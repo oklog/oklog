@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "fullname" . }}-cm
+  labels:
+    app: {{ template "fullname" . }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+{{ $nodeCount := .Values.replicas | int }}
+data:
+  start.sh: |
+     #!/bin/sh
+     #cat << EOF
+     #/oklog ingeststore \
+     # -api tcp://0.0.0.0:1000 \
+     # -ingest.fast tcp://0.0.0.0:1001 \
+     # -ingest.durable tcp://0.0.0.0:1002 \
+     # -ingest.bulk tcp://0.0.0.0:1003 \
+     # -cluster tcp://0.0.0.0:1009 \
+     # -store.segment-target-size 1000000 \
+     # -store.segment-replication-factor 1 \
+     # -store.segment-retain 30m \
+     # -store.segment-purge 5m \
+     #{{- range $i := until $nodeCount }}
+     #  -peer {{ template "fullname" $ }}-{{$i}}.{{ template "fullname" $ }}.{{ $.Release.Namespace }}.svc.cluster.local:1009 \
+     #{{- end }}
+     #EOF
+
+     /oklog ingeststore \
+      -api tcp://0.0.0.0:3000 \
+      -ingest.fast tcp://0.0.0.0:3001 \
+      -ingest.durable tcp://0.0.0.0:3002 \
+      -ingest.bulk tcp://0.0.0.0:3003 \
+      -debug \
+      -cluster tcp://$POD_IP:3009 \
+      -store.segment-target-size 1000000 \
+      -store.segment-replication-factor 2 \
+      -store.segment-retain 30m \
+      -store.segment-purge 5m \
+     {{- range $i := until $nodeCount }}
+      -peer {{ template "fullname" $ }}-{{$i}}.{{ template "fullname" $ }}.{{ $.Release.Namespace }}.svc.cluster.local:3009 \
+     {{- end }}

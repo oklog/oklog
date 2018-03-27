@@ -1,0 +1,37 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: {{ template "fullname" . }}-service
+  labels:
+    app: {{ template "fullname" . }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    release: "{{ .Release.Name }}"
+    heritage: "{{ .Release.Service }}"
+spec:
+  type: {{ .Values.serviceType }}
+  {{- if eq .Values.serviceType "LoadBalancer" }}
+  loadBalancerIP: {{ default "" .Values.loadBalancerIP }}
+  {{- end }}
+  selector:
+    app: {{ template "fullname" . }}
+  ports:
+    - name: api
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
+    - name: ingest-fast
+      port: 3001
+      targetPort: 3001
+      protocol: TCP
+    - name: ingest-durable
+      port: 3002
+      targetPort: 3002
+      protocol: TCP
+    - name: ingest-bulk
+      port: 3003
+      targetPort: 3003
+      protocol: TCP
+    - name: ingest-cluster
+      port: 3009
+      targetPort: 3009
+      protocol: TCP

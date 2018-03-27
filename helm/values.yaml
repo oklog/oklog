@@ -1,0 +1,20 @@
+# Inspired by https://github.com/kubernetes/charts/blob/master/stable/minio/values.yaml
+
+# Docker image
+image: "oklog/oklog"
+imageTag: v0.2.1
+imagePullPolicy: "Always"
+
+replicas: 4
+persistence:
+  accessMode: ReadWriteOnce
+  size: 1Gi
+
+serviceType: LoadBalancer
+servicePort: 3000
+
+# Configure
+resources:
+  requests:
+    memory: 128Mi
+    cpu: 125m

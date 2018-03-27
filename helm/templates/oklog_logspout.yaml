@@ -1,0 +1,35 @@
+# From https://github.com/oklog/oklog/wiki/Integrations
+# Run a logspout service on each node, and send the data to the oklog-ingest service.
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: {{ template "fullname" . }}-logspout
+spec:
+  template:
+    metadata:
+      labels:
+        app: {{ template "fullname" . }}-logspout
+        chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+        release: "{{ .Release.Name }}"
+        heritage: "{{ .Release.Service }}"
+    spec:
+      hostPID: true
+      hostIPC: true
+      containers:
+        - resources:
+            requests:
+              cpu: 0.15
+          securityContext:
+            privileged: true
+          env:
+            - name: ROUTE_URIS
+              value: raw+tcp://{{ template "fullname" . }}.{{ $.Release.Namespace }}.svc.cluster.local:3001
+          image: gliderlabs/logspout:v3.1
+          name: logspout
+          volumeMounts:
+            - name: log
+              mountPath: /var/run/docker.sock
+      volumes:
+        - name: log
+          hostPath:
+              path: /var/run/docker.sock
