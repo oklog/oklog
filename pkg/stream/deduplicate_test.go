@@ -17,7 +17,7 @@ func TestDeduplicate(t *testing.T) {
 		tick   = make(chan time.Time)
 		ticker = func(time.Duration) *time.Ticker { return &time.Ticker{C: tick} }
 		window = time.Second
-		out    = Deduplicate(in, window, ticker)
+		out    = make(chan []byte, 1024)
 		t0     = time.Now()
 		t1     = t0.Add(1 * window)
 		t2     = t0.Add(2 * window)
@@ -29,6 +29,12 @@ func TestDeduplicate(t *testing.T) {
 		rec2b = []byte(fmt.Sprintf("%s Bbb2", ulid.MustNew(ulid.Timestamp(t1), nil).String()))
 		rec3  = []byte(fmt.Sprintf("%s Cccc", ulid.MustNew(ulid.Timestamp(t2), nil).String()))
 	)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		Deduplicate(in, window, ticker, out)
+	}()
 
 	// Out-of-order and duplicate inserts.
 	in <- rec3
@@ -98,9 +104,11 @@ func TestDeduplicate(t *testing.T) {
 		// good
 	}
 
-	// Close the in chan, wait for the close on the out chan.
+	// Close the in chan, wait for Deduplicate to return.
 	close(in)
 	select {
+	case <-done:
+		// good
 	case record, ok := <-out:
 		if ok {
 			t.Fatalf("unexpected record: %q", record)

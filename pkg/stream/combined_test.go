@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"testing"
 	"time"
@@ -19,8 +18,8 @@ func TestCombined(t *testing.T) {
 
 	// Our three nodes.
 	type pipe struct {
-		io.Reader
-		io.Writer
+		*io.PipeReader
+		*io.PipeWriter
 	}
 	var (
 		addrs = []string{"foo", "bar", "baz"}
@@ -35,27 +34,31 @@ func TestCombined(t *testing.T) {
 	peerFactory := func() []string {
 		return addrs
 	}
-	readCloserFactory := func(_ context.Context, addr string) (io.ReadCloser, error) {
-		return ioutil.NopCloser(nodes[addr]), nil
+	readCloserFactory := func(ctx context.Context, addr string) (io.ReadCloser, error) {
+		return newContextReadCloser(ctx, struct {
+			io.Reader
+			io.Closer
+		}{
+			Reader: nodes[addr].PipeReader,
+			Closer: nodes[addr].PipeWriter,
+		}), nil
 	}
 
-	// Our stream and deduplicate workers.
+	// Our stream and deduplicate workers, just like in the API.
 	var (
 		ctx, cancel = context.WithCancel(context.Background())
 		window      = 500 * time.Millisecond
 	)
-	raw := Execute(
-		ctx,
-		peerFactory,
-		readCloserFactory,
-		time.Sleep,
-		time.NewTicker,
-	)
-	deduplicated := Deduplicate(
-		raw,
-		window,
-		time.NewTicker,
-	)
+	raw := make(chan []byte, 1024)
+	go func() {
+		Execute(ctx, peerFactory, readCloserFactory, time.Sleep, time.NewTicker, raw)
+		close(raw)
+	}()
+	deduplicated := make(chan []byte, 1024)
+	go func() {
+		Deduplicate(raw, window, time.NewTicker, deduplicated)
+		close(deduplicated)
+	}()
 
 	// We gonna send some unique records.
 	count := 255
@@ -64,12 +67,13 @@ func TestCombined(t *testing.T) {
 	go func() {
 		writers := make([]io.Writer, 0, len(nodes))
 		for _, p := range nodes {
-			writers = append(writers, p.Writer)
+			writers = append(writers, p.PipeWriter)
 		}
 		for i, value := range rand.Perm(count) {
 			id := ulid.MustNew(uint64(value), nil)
 			fmt.Fprintf(writers[(i+0)%len(writers)], "%s %d\n", id, value)
 			fmt.Fprintf(writers[(i+1)%len(writers)], "%s %d\n", id, value)
+			fmt.Fprintf(writers[(i+2)%len(writers)], "%s %d\n", id, value)
 		}
 	}()
 
@@ -91,6 +95,14 @@ func TestCombined(t *testing.T) {
 			t.Errorf("got unexpected record after context cancelation: %q", record)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for shutdown after context cancelation")
+		t.Fatal("timeout waiting for Execute and Deduplicate shutdown after context cancelation")
 	}
+}
+
+func newContextReadCloser(ctx context.Context, rc io.ReadCloser) io.ReadCloser {
+	go func() {
+		<-ctx.Done()
+		rc.Close()
+	}()
+	return rc
 }

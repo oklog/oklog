@@ -95,16 +95,23 @@ func TestIssue59(t *testing.T) {
 		rcf         = func(_ context.Context, peer string) (io.ReadCloser, error) { return infiniteReader(peer), nil }
 		sleep       = func(time.Duration) {} // no sleep
 		ticker      = time.NewTicker
-		sink        = Execute(ctx, pf, rcf, sleep, ticker)
+		sink        = make(chan []byte, 1024)
+		done        = make(chan struct{})
 	)
+
+	go func() {
+		Execute(ctx, pf, rcf, sleep, ticker, sink)
+		close(sink)
+		close(done)
+	}()
 
 	// Drain the records as quickly as possible.
 	var (
-		done  = make(chan struct{})
-		count = 0
+		draindone = make(chan struct{})
+		count     = 0
 	)
 	go func() {
-		defer close(done)
+		defer close(draindone)
 		for range sink {
 			count++
 		}
@@ -112,10 +119,11 @@ func TestIssue59(t *testing.T) {
 
 	// Run it awhile, then cancel.
 	begin := time.Now()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 	cancel()
-	<-done
+	<-draindone
 	t.Logf("drained %d in %s", count, time.Since(begin))
+	<-done
 }
 
 type ctxReader struct {

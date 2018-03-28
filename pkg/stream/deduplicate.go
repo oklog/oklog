@@ -13,30 +13,25 @@ import (
 // A smaller window may cause duplicate or out-of-order messages.
 // A larger window will cause higher end-to-end latency.
 // The ticker is used every window / 10 to flush the buffer.
-// The returned chan is closed when the in chan is closed.
-func Deduplicate(in <-chan []byte, window time.Duration, ticker func(time.Duration) *time.Ticker) <-chan []byte {
-	out := make(chan []byte, 1024) // TODO(pb): validate buffer size
-	go func() {
-		var (
-			d  = dedupe{BTree: btree.New(2)}
-			tk = ticker(window / 10)
-		)
-		defer tk.Stop()
-		defer close(out)
-		for {
-			select {
-			case record, ok := <-in:
-				if !ok {
-					return
-				}
-				d.insert(record)
-
-			case now := <-tk.C:
-				d.remove(now.Add(-window), out)
+// The function returns when the `in` chan is closed.
+func Deduplicate(in <-chan []byte, window time.Duration, ticker func(time.Duration) *time.Ticker, out chan<- []byte) {
+	var (
+		d  = dedupe{BTree: btree.New(2)}
+		tk = ticker(window / 10)
+	)
+	defer tk.Stop()
+	for {
+		select {
+		case record, ok := <-in:
+			if !ok {
+				return
 			}
+			d.insert(record)
+
+		case now := <-tk.C:
+			d.remove(now.Add(-window), out)
 		}
-	}()
-	return out
+	}
 }
 
 type dedupe struct{ *btree.BTree }
