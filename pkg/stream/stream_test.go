@@ -87,6 +87,45 @@ func TestReadUntilCanceled(t *testing.T) {
 	}
 }
 
+func TestIssue59(t *testing.T) {
+	// Start Execute, streaming from some infinite sources.
+	var (
+		ctx, cancel = context.WithCancel(context.Background())
+		pf          = func() []string { return []string{"alpha", "bravo", "charlie"} }
+		rcf         = func(_ context.Context, peer string) (io.ReadCloser, error) { return infiniteReader(peer), nil }
+		sleep       = func(time.Duration) {} // no sleep
+		ticker      = time.NewTicker
+		sink        = make(chan []byte, 1024)
+		done        = make(chan struct{})
+	)
+
+	go func() {
+		Execute(ctx, pf, rcf, sleep, ticker, sink)
+		close(sink)
+		close(done)
+	}()
+
+	// Drain the records as quickly as possible.
+	var (
+		draindone = make(chan struct{})
+		count     = 0
+	)
+	go func() {
+		defer close(draindone)
+		for range sink {
+			count++
+		}
+	}()
+
+	// Run it awhile, then cancel.
+	begin := time.Now()
+	time.Sleep(250 * time.Millisecond)
+	cancel()
+	<-draindone
+	t.Logf("drained %d in %s", count, time.Since(begin))
+	<-done
+}
+
 type ctxReader struct {
 	ctx context.Context
 	rec []byte
@@ -106,3 +145,11 @@ func (r *ctxReader) Read(p []byte) (int, error) {
 }
 
 func (*ctxReader) Close() error { return nil }
+
+type infiniteReader string
+
+func (r infiniteReader) Read(p []byte) (int, error) {
+	return copy(p, []byte(string(r)+"\n")), nil
+}
+
+func (r infiniteReader) Close() error { return nil }
