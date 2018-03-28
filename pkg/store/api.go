@@ -358,23 +358,23 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 		return u.String()
 	})
 
-	// The raw chan is closed when the context is canceled.
-	raw := stream.Execute(
-		r.Context(),
-		peerFactory,
-		readCloserFactory,
-		time.Sleep,
-		time.NewTicker,
-	)
+	// Execute returns when the context is canceled.
+	// We must close the raw chan, which we own.
+	raw := make(chan []byte, 1024)
+	go func() {
+		stream.Execute(r.Context(), peerFactory, readCloserFactory, time.Sleep, time.NewTicker, raw)
+		close(raw)
+	}()
 
-	// The deduplicated chan is closed when the raw chan is closed.
-	deduplicated := stream.Deduplicate(
-		raw,
-		window,
-		time.NewTicker,
-	)
+	// Deduplicate returns when the raw chan is closed.
+	// We must close the deduplicated chan, which we own.
+	deduplicated := make(chan []byte, 1024)
+	go func() {
+		stream.Deduplicate(raw, window, time.NewTicker, deduplicated)
+		close(deduplicated)
+	}()
 
-	// Thus, we range over the deduplicated chan.
+	// Thus, we can range over the deduplicated chan.
 	for record := range deduplicated {
 		w.Write(record)
 		w.Write([]byte{'\n'})
