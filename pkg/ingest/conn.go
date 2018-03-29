@@ -3,6 +3,7 @@ package ingest
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -45,10 +46,9 @@ func HandleConnections(
 			return err
 		}
 
-		// Create a new entropy source and ID generator for this connection.
-		// rand.New is not goroutine safe!
-		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
-		idGen := func() string { return ulid.MustNew(ulid.Now(), entropy).String() }
+		// Create a new logical clock for the stream and ID generator for this connection.
+		clock := newStreamClock()
+		idGen := func() string { return ulid.MustNew(ulid.Now(), clock).String() }
 
 		// Register the connection in the manager, and launch the handler.
 		// The handler may exit from the client, or via manager shutdown.
@@ -171,4 +171,40 @@ func (m *connectionManager) isEmpty() bool {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 	return len(m.active) <= 0
+}
+
+// streamClock is a logical clock that is initialized to start at a random offset
+// that identifies a stream.
+// It's guaranteed that the 4 high bytes are 0 initially. If they overflow, the random
+// component is incremented by 1, effectively creating a new stream identifier.
+// It is not safe to be used concurrently.
+type streamClock struct {
+	prefix [2]byte
+	clock  uint64
+}
+
+func newStreamClock() *streamClock {
+	var sc streamClock
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	binary.BigEndian.PutUint16(sc.prefix[:], uint16(r.Int()))
+	// The first 4 bytes of the clock are initialized randomly. The first bit is always
+	// zero so the random part just increments by 1 if the high 4 bytes overflow.
+	sc.clock = uint64(r.Int31()) << 32
+
+	return &sc
+}
+
+// Read populates b with the next clock tick and increments the clock.
+// b must be of length 10.
+func (sc *streamClock) Read(b []byte) (int, error) {
+	if len(b) != 10 {
+		return 0, fmt.Errorf("illegal read of length %d, expected 10", len(b))
+	}
+	copy(b, sc.prefix[:])
+	binary.BigEndian.PutUint64(b[2:], sc.clock)
+
+	sc.clock++
+
+	return len(b), nil
 }
