@@ -11,6 +11,7 @@ It's an on-prem solution that's designed to be a sort of building block: easy to
 
 - [Article motivating the system](https://peter.bourgon.org/ok-log)
 - [Detailed system design](DESIGN.md)
+- [Architectural Decision Records](doc/arch)
 
 ## Is OK Log for me?
 
@@ -143,7 +144,9 @@ So, e.g. http://localhost:7650/ui.
 - [Kubernetes](https://github.com/oklog/oklog/wiki/Integrations#kubernetes)
 
 ### Translation
+
 - [中文介绍](https://github.com/1046102779/OKLog) 
+
 ---
 
 [OK icon](https://thenounproject.com/term/like/594444/) by
