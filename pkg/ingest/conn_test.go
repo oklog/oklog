@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	cryptorand "crypto/rand"
 	"encoding/binary"
@@ -11,6 +10,7 @@ import (
 	mathrand "math/rand"
 	"net"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,6 +22,113 @@ import (
 	"github.com/oklog/oklog/pkg/fs"
 )
 
+func TestDynamicRecordReader(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		err   error
+		input string
+		exp   []string
+	}{
+		{
+			name:  "basic",
+			input: "topic_A foo1\ntopic_B foo2\ntopic_A foo2\n",
+			exp:   []string{"topic_A foo1\n", "topic_B foo2\n", "topic_A foo2\n"},
+		}, {
+			name:  "no-final-newline",
+			input: "topic_A foo1\ntopic_B foo2\ntopic_A foo2",
+			exp:   []string{"topic_A foo1\n", "topic_B foo2\n"},
+		}, {
+			name:  "no-topic",
+			input: "topic_A foo1\nabcdef\ntopic_B foo2\n",
+			exp:   []string{"topic_A foo1\n"},
+			err:   ErrIllegalTopicFormat,
+		}, {
+			name:  "empty-record",
+			input: "topic_A foo1\n\ntopic_B foo2\n",
+			exp:   []string{"topic_A foo1\n"},
+			err:   ErrIllegalTopicFormat,
+		}, {
+			name:  "bad-topic",
+			input: "to~pic foo1\n",
+			err:   ErrIllegalTopicFormat,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var res []string
+			var rec []byte
+			var err error
+
+			r := NewDynamicRecordReader(bytes.NewBufferString(c.input))
+			for {
+				rec, err = r()
+				if err != nil {
+					break
+				}
+				res = append(res, string(rec))
+			}
+			if err != io.EOF && err != c.err {
+				t.Fatalf("unexpected error: want %q, got %q", c.err, err)
+			}
+			if !reflect.DeepEqual(c.exp, res) {
+				t.Fatalf("unexpected records: want (%v), got (%v)", c.exp, res)
+			}
+		})
+	}
+}
+func TestStaticRecordReader(t *testing.T) {
+	// Illegal topic characters.
+	if _, err := NewStaticRecordReader("top~ic", nil); err != ErrIllegalTopicFormat {
+		t.Fatalf("expected illegal topic error but got %q", err)
+	}
+
+	for _, c := range []struct {
+		name  string
+		err   error
+		input string
+		exp   []string
+	}{
+		{
+			name:  "basic",
+			input: "foo1\nfoo2\nfoo3\n",
+			exp:   []string{"topic_A foo1\n", "topic_A foo2\n", "topic_A foo3\n"},
+		},
+		{
+			name:  "no-newline",
+			input: "foo1\nfoo2\nfoo3",
+			exp:   []string{"topic_A foo1\n", "topic_A foo2\n"},
+		},
+		{
+			name:  "empty-record",
+			input: "foo1\n\nfoo2\n",
+			exp:   []string{"topic_A foo1\n", "topic_A \n", "topic_A foo2\n"},
+			err:   ErrIllegalTopicFormat,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var res []string
+			var rec []byte
+			var err error
+
+			r, err := NewStaticRecordReader("topic_A", bytes.NewBufferString(c.input))
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			for {
+				rec, err = r()
+				if err != nil {
+					break
+				}
+				res = append(res, string(rec))
+			}
+			if err != io.EOF && err != c.err {
+				t.Fatalf("unexpected error: want %q, got %q", c.err, err)
+			}
+			if !reflect.DeepEqual(c.exp, res) {
+				t.Fatalf("unexpected records: want (%v), got (%v)", c.exp, res)
+			}
+		})
+	}
+}
 func TestHandleConnectionsCleanup(t *testing.T) {
 	// Bind a listener on some port.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -53,7 +160,7 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 	)
 	go func() {
 		errc <- HandleConnections(
-			ln, connectionHandler, log, segmentFlushAge, segmentFlushSize,
+			ln, connectionHandler, NewDynamicRecordReader, log, segmentFlushAge, segmentFlushSize,
 			connectedClients, bytes, records, syncs, segmentAge, segmentSize,
 		)
 	}()
@@ -69,7 +176,7 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 	}
 
 	// Write something to make sure the connection is good.
-	message := "hello, world!\n"
+	message := "test_topic hello, world!\n"
 	if n, err := fmt.Fprint(conn, message); err != nil {
 		t.Fatal(err)
 	} else if want, have := len(message), n; want != have {
@@ -110,13 +217,17 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 }
 
 func echo(t *testing.T) ConnectionHandler {
-	return func(conn net.Conn, w *Writer, _ IDGenerator, _ prometheus.Gauge) error {
-		s := bufio.NewScanner(conn)
-		for s.Scan() {
-			t.Logf("RECV> %s", s.Text())
-			fmt.Fprintln(w, s.Text())
+	return func(read RecordReader, w *Writer, _ IDGenerator, _ prometheus.Gauge) error {
+		for {
+			r, err := read()
+			if err == io.EOF {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			t.Logf("RECV> %s", r)
+			fmt.Fprintln(w, r)
 		}
-		return s.Err()
 	}
 }
 

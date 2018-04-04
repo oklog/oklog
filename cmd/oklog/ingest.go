@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -31,6 +32,11 @@ const (
 	defaultIngestSegmentPendingTimeout = time.Minute
 )
 
+const (
+	topicModeStatic = "static"
+	topicModePrefix = "prefix"
+)
+
 var (
 	defaultFastAddr    = fmt.Sprintf("tcp://0.0.0.0:%d", defaultFastPort)
 	defaultDurableAddr = fmt.Sprintf("tcp://0.0.0.0:%d", defaultDurablePort)
@@ -42,6 +48,8 @@ func runIngest(args []string) error {
 	flagset := flag.NewFlagSet("ingest", flag.ExitOnError)
 	var (
 		debug                 = flagset.Bool("debug", false, "debug logging")
+		topicMode             = flagset.String("topic-mode", topicModeStatic, "topic mode for ingested records (static, prefix)")
+		topic                 = flagset.String("topic", "default", "static topic name (requires -topic-mode=static)")
 		apiAddr               = flagset.String("api", defaultAPIAddr, "listen address for ingest API")
 		fastAddr              = flagset.String("ingest.fast", defaultFastAddr, "listen address for fast (async) writes")
 		durableAddr           = flagset.String("ingest.durable", defaultDurableAddr, "listen address for durable (sync) writes")
@@ -245,10 +253,12 @@ func runIngest(args []string) error {
 	default:
 		return errors.Errorf("invalid -filesystem %q", *filesystem)
 	}
+
 	ingestLog, err := ingest.NewFileLog(fsys, *ingestPath)
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		if err := ingestLog.Close(); err != nil {
 			level.Error(logger).Log("err", err)
@@ -273,6 +283,17 @@ func runIngest(args []string) error {
 		Help:      "Number of peers in the cluster from this node's perspective.",
 	}, func() float64 { return float64(peer.ClusterSize()) }))
 
+	recordRdr := ingest.NewDynamicRecordReader
+	if *topicMode == topicModeStatic {
+		recordRdr = func(r io.Reader) ingest.RecordReader {
+			rr, err := ingest.NewStaticRecordReader(*topic, r)
+			if err != nil {
+				panic(err)
+			}
+			return rr
+		}
+	}
+
 	// Execution group.
 	var g group.Group
 	{
@@ -289,6 +310,7 @@ func runIngest(args []string) error {
 			return ingest.HandleConnections(
 				fastListener,
 				ingest.HandleFastWriter,
+				recordRdr,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("fast"),
@@ -302,6 +324,7 @@ func runIngest(args []string) error {
 			return ingest.HandleConnections(
 				durableListener,
 				ingest.HandleDurableWriter,
+				recordRdr,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("durable"),
@@ -315,6 +338,7 @@ func runIngest(args []string) error {
 			return ingest.HandleConnections(
 				bulkListener,
 				ingest.HandleBulkWriter,
+				recordRdr,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("bulk"),

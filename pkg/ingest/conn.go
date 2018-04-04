@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"sync"
@@ -21,6 +22,7 @@ import (
 func HandleConnections(
 	ln net.Listener,
 	h ConnectionHandler,
+	reader func(io.Reader) RecordReader,
 	log Log,
 	segmentFlushAge time.Duration,
 	segmentFlushSize int,
@@ -55,75 +57,125 @@ func HandleConnections(
 		// In either case, the writer is closed.
 		m.register(conn)
 		go func() {
-			h(conn, w, idGen, connectedClients)
+			defer conn.Close()
+			h(reader(conn), w, idGen, connectedClients)
 			w.Stop() // make sure it's flushed
 			m.remove(conn)
 		}()
 	}
 }
 
+// ErrIllegalTopicFormat is returned if a record did not start with a proper topic prefix.
+var ErrIllegalTopicFormat = errors.New("illegal topic formatting")
+
+// RecordReader emits records that are prefixed with a topic.
+// It returns io.EOF if the underlying record source has no more data.
+type RecordReader func() (record []byte, err error)
+
+// NewDynamicRecordReader returns a record reader that expects each input record from r
+// to start with a space-delimited topic identifier.
+func NewDynamicRecordReader(r io.Reader) RecordReader {
+	br := bufio.NewReader(r)
+
+	return func() ([]byte, error) {
+		l, err := br.ReadBytes('\n')
+		if err != nil {
+			return nil, err
+		}
+		// Validate that a correct topic prefix exists.
+		if i := bytes.IndexByte(l, ' '); i < 0 || !isValidTopic(l[:i]) {
+			return nil, ErrIllegalTopicFormat
+		}
+		return l, nil
+	}
+}
+
+// NewStaticRecordReader returns a record reader that prefixes all input records
+// with a static topic.
+func NewStaticRecordReader(topic string, r io.Reader) (RecordReader, error) {
+	tb := []byte(topic)
+	if !isValidTopic(tb) {
+		return nil, ErrIllegalTopicFormat
+	}
+	tb = append(tb, ' ')
+	br := bufio.NewReader(r)
+
+	return func() ([]byte, error) {
+		l, err := br.ReadBytes('\n')
+		if err != nil {
+			return nil, err
+		}
+		return append(tb, l...), nil
+	}, nil
+}
+
+// isValidTopic ensures that the a topic only contains allowed characters. It implements
+// the regex [a-zA-Z0-9_-]+
+// It takes a byte slice to avoid memory allocations at the caller.
+func isValidTopic(b []byte) bool {
+	for _, c := range b {
+		if !(c == '_' || c == '-' || ('0' <= c && c <= '9') || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')) {
+			return false
+		}
+	}
+	return len(b) > 0
+}
+
 // ConnectionHandler forwards records from the net.Conn to the IngestLog.
-type ConnectionHandler func(conn net.Conn, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) error
+type ConnectionHandler func(r RecordReader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) error
 
 // HandleFastWriter is a ConnectionHandler that writes records to the IngestLog.
-func HandleFastWriter(conn net.Conn, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
+func HandleFastWriter(r RecordReader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
 	connectedClients.Inc()
 	defer connectedClients.Dec()
-	defer conn.Close()
-	s := bufio.NewScanner(conn)
-	s.Split(scanLinesPreserveNewline)
-	for s.Scan() {
+
+	for {
+		record, err := r()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		// TODO(pb): short writes are possible
-		if _, err := fmt.Fprintf(w, "%s %s", idGen(), s.Text()); err != nil {
+		if _, err := fmt.Fprintf(w, "%s %s", idGen(), record); err != nil {
 			return err
 		}
 	}
-	return s.Err()
 }
 
 // HandleDurableWriter is a ConnectionHandler that writes records to the
 // IngestLog and syncs after each record.
-func HandleDurableWriter(conn net.Conn, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
+func HandleDurableWriter(r RecordReader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
 	connectedClients.Inc()
 	defer connectedClients.Dec()
-	defer conn.Close()
-	s := bufio.NewScanner(conn)
-	s.Split(scanLinesPreserveNewline)
-	for s.Scan() {
+
+	for {
+		record, err := r()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		// TODO(pb): short writes are possible
-		if _, err := fmt.Fprintf(w, "%s %s", idGen(), s.Text()); err != nil {
+		if _, err := fmt.Fprintf(w, "%s %s", idGen(), record); err != nil {
 			return err
 		}
 		if err := w.Sync(); err != nil {
 			return err
 		}
 	}
-	return s.Err()
 }
 
 // HandleBulkWriter is a ConnectionHandler that writes an entire segment to the
 // IngestLog at once.
-func HandleBulkWriter(conn net.Conn, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
-	conn.Close()
+func HandleBulkWriter(r RecordReader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
 	return errors.New("TODO(pb): not implemented")
 }
 
 // IDGenerator should return unique record identifiers, i.e. ULIDs.
 type IDGenerator func() string
-
-// Like bufio.ScanLines, but retain the \n.
-func scanLinesPreserveNewline(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	if atEOF && len(data) == 0 {
-		return 0, nil, nil
-	}
-	if i := bytes.IndexByte(data, '\n'); i >= 0 {
-		return i + 1, data[0 : i+1], nil
-	}
-	if atEOF {
-		return len(data), data, nil
-	}
-	return 0, nil, nil
-}
 
 func newConnectionManager() *connectionManager {
 	return &connectionManager{

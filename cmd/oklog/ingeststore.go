@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -28,6 +29,8 @@ func runIngestStore(args []string) error {
 	var (
 		debug                    = flagset.Bool("debug", false, "debug logging")
 		apiAddr                  = flagset.String("api", defaultAPIAddr, "listen address for ingest and store APIs")
+		topicMode                = flagset.String("ingest.topic-mode", topicModeStatic, "topic mode for ingested records (static, dynamic)")
+		topic                    = flagset.String("ingest.topic", "default", "static topic name (requires -topic-mode=static)")
 		fastAddr                 = flagset.String("ingest.fast", defaultFastAddr, "listen address for fast (async) writes")
 		durableAddr              = flagset.String("ingest.durable", defaultDurableAddr, "listen address for durable (sync) writes")
 		bulkAddr                 = flagset.String("ingest.bulk", defaultBulkAddr, "listen address for bulk (whole-segment) writes")
@@ -355,6 +358,17 @@ func runIngestStore(args []string) error {
 		},
 	}
 
+	recordRdr := ingest.NewDynamicRecordReader
+	if *topicMode == topicModeStatic {
+		recordRdr = func(r io.Reader) ingest.RecordReader {
+			rr, err := ingest.NewStaticRecordReader(*topic, r)
+			if err != nil {
+				panic(err)
+			}
+			return rr
+		}
+	}
+
 	// Execution group.
 	var g group.Group
 	{
@@ -371,6 +385,7 @@ func runIngestStore(args []string) error {
 			return ingest.HandleConnections(
 				fastListener,
 				ingest.HandleFastWriter,
+				recordRdr,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("fast"),
@@ -384,6 +399,7 @@ func runIngestStore(args []string) error {
 			return ingest.HandleConnections(
 				durableListener,
 				ingest.HandleDurableWriter,
+				recordRdr,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("durable"),
@@ -397,6 +413,7 @@ func runIngestStore(args []string) error {
 			return ingest.HandleConnections(
 				bulkListener,
 				ingest.HandleBulkWriter,
+				recordRdr,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("bulk"),
