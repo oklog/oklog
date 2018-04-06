@@ -22,6 +22,8 @@ type Compacter struct {
 	trashSegments     *prometheus.CounterVec
 	purgeSegments     *prometheus.CounterVec
 	reporter          EventReporter
+
+	ops []func()
 }
 
 // NewCompacter creates a Compacter.
@@ -32,7 +34,7 @@ func NewCompacter(
 	compactDuration *prometheus.HistogramVec, trashSegments, purgeSegments *prometheus.CounterVec,
 	reporter EventReporter,
 ) *Compacter {
-	return &Compacter{
+	c := &Compacter{
 		log:               log,
 		segmentTargetSize: segmentTargetSize,
 		retain:            retain,
@@ -43,6 +45,18 @@ func NewCompacter(
 		compactDuration:   compactDuration,
 		reporter:          reporter,
 	}
+	c.ops = []func(){
+		func() { c.compact("Overlapping", c.log.Overlapping) },
+		func() { c.compact("Sequential", c.log.Sequential) },
+		func() { c.moveToTrash() },
+		func() { c.emptyTrash() },
+	}
+	return c
+}
+
+func (c *Compacter) Next() {
+	c.ops[0]()
+	c.ops = append(c.ops[1:], c.ops[0])
 }
 
 // Run performs compactions and cleanups.
@@ -197,4 +211,15 @@ func (c *Compacter) emptyTrash() {
 			})
 		}
 	}
+}
+
+type TopicCompacters map[string]*Compacter
+
+func (tc TopicCompacters) Ensure(t string, nc func() *Compacter) {
+	_, ok := tc[t]
+	if ok {
+		return
+	}
+	c := nc()
+	tc[t] = c
 }

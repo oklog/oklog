@@ -46,7 +46,8 @@ type Doer interface {
 // API serves the store API.
 type API struct {
 	peer               ClusterPeer
-	log                Log
+	stagingLog         Log
+	topicLogs          *TopicLogs
 	queryClient        Doer // should time out
 	streamClient       Doer // should not time out
 	streamQueries      *queryRegistry
@@ -59,7 +60,8 @@ type API struct {
 // NewAPI returns a usable API.
 func NewAPI(
 	peer ClusterPeer,
-	log Log,
+	stagingLog Log,
+	topicLogs *TopicLogs,
 	queryClient, streamClient Doer,
 	replicatedSegments, replicatedBytes prometheus.Counter,
 	duration *prometheus.HistogramVec,
@@ -67,7 +69,8 @@ func NewAPI(
 ) *API {
 	return &API{
 		peer:               peer,
-		log:                log,
+		stagingLog:         stagingLog,
+		topicLogs:          topicLogs,
 		queryClient:        queryClient,
 		streamClient:       streamClient,
 		streamQueries:      newQueryRegistry(),
@@ -305,7 +308,12 @@ func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request) {
 		statsOnly = true
 	}
 
-	result, err := a.log.Query(qp, statsOnly)
+	log, ok := a.topicLogs.Get(qp.Topic)
+	if !ok {
+		http.Error(w, "topic does not exist", http.StatusNotFound)
+		return
+	}
+	result, err := log.Query(qp, statsOnly)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -413,7 +421,8 @@ func (a *API) handleInternalStream(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleReplicate(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	segment, err := a.log.Create()
+
+	segment, err := a.stagingLog.Create()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

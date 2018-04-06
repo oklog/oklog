@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/oklog/ulid"
@@ -12,6 +13,9 @@ import (
 type Log interface {
 	// Create a new segment for writes.
 	Create() (WriteSegment, error)
+
+	// Get the oldest segment.
+	Oldest() (ReadSegment, error)
 
 	// Query written and closed segments.
 	Query(qp QueryParams, statsOnly bool) (QueryResult, error)
@@ -75,4 +79,53 @@ type LogStats struct {
 	ReadingBytes    int64
 	TrashedSegments int64
 	TrashedBytes    int64
+}
+
+// TopicLogs lazily gives access to per-topic logs.
+type TopicLogs struct {
+	newLog func(string) (Log, error)
+	mtx    sync.Mutex
+	m      map[string]Log
+}
+
+func NewTopicLogs(newLog func(string) (Log, error)) *TopicLogs {
+	return &TopicLogs{
+		newLog: newLog,
+		m:      map[string]Log{},
+	}
+}
+
+func (tl *TopicLogs) Get(t string) (Log, bool) {
+	tl.mtx.Lock()
+	defer tl.mtx.Unlock()
+
+	l, ok := tl.m[t]
+	return l, ok
+}
+
+func (tl *TopicLogs) GetOrCreate(t string) (Log, error) {
+	tl.mtx.Lock()
+	defer tl.mtx.Unlock()
+
+	l, ok := tl.m[t]
+	if ok {
+		return l, nil
+	}
+	l, err := tl.newLog(t)
+	if err != nil {
+		return nil, err
+	}
+	tl.m[t] = l
+	return l, nil
+}
+
+func (tl *TopicLogs) Clone() map[string]Log {
+	tl.mtx.Lock()
+	defer tl.mtx.Unlock()
+
+	m := map[string]Log{}
+	for t, l := range tl.m {
+		m[t] = l
+	}
+	return m
 }

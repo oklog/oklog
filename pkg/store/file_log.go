@@ -124,6 +124,32 @@ func (fl *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 	}, nil
 }
 
+func (fl *fileLog) Oldest() (ReadSegment, error) {
+	var (
+		oldest = time.Now()
+		chosen string
+	)
+	fl.filesys.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil // recurse
+		}
+		if filepath.Ext(path) != extFlushed {
+			return nil // skip
+		}
+		if t := info.ModTime(); t.Before(oldest) {
+			chosen, oldest = path, t
+		}
+		return nil
+	})
+	if chosen == "" {
+		return nil, ErrNoSegmentsAvailable
+	}
+	return newFileReadSegment(fl.filesys, chosen)
+}
+
 func (fl *fileLog) Overlapping() ([]ReadSegment, error) {
 	// We make a simple n-squared algorithm for now.
 	// First, collect all flushed segments.

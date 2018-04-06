@@ -113,6 +113,9 @@ func newFixtureAPI(t *testing.T) (*API, error) {
 	if err != nil {
 		return nil, err
 	}
+	topicLogs := NewTopicLogs(func(t string) (Log, error) {
+		return NewFileLog(filesys, t, 10240, 1024, logReporter)
+	})
 
 	// Build an API around that file log.
 	var (
@@ -122,7 +125,7 @@ func newFixtureAPI(t *testing.T) (*API, error) {
 		replicatedSegments = prometheus.NewCounter(prometheus.CounterOpts{})
 		replicatedBytes    = prometheus.NewCounter(prometheus.CounterOpts{})
 		duration           = prometheus.NewHistogramVec(prometheus.HistogramOpts{}, []string{"method", "path", "status_code"})
-		a                  = NewAPI(peer, filelog, queryClient, streamClient, replicatedSegments, replicatedBytes, duration, apiReporter)
+		a                  = NewAPI(peer, filelog, topicLogs, queryClient, streamClient, replicatedSegments, replicatedBytes, duration, apiReporter)
 	)
 
 	// Populate the store via the replicate API.

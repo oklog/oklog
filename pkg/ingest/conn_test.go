@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/oklog/ulid"
-
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/oklog/oklog/pkg/fs"

@@ -18,6 +18,7 @@ import (
 // QueryParams defines all dimensions of a query.
 // StatsOnly is implicit by the HTTP method.
 type QueryParams struct {
+	Topic string     `json:"topic"`
 	From  ulidOrTime `json:"from"`
 	To    ulidOrTime `json:"to"`
 	Q     string     `json:"q"`
@@ -32,6 +33,7 @@ func (qp *QueryParams) DecodeFrom(u *url.URL, rb rangeBehavior) error {
 	if err := qp.To.Parse(u.Query().Get("to")); err != nil && rb == rangeRequired {
 		return errors.Wrap(err, "parsing 'to'")
 	}
+	qp.Topic = u.Query().Get("topic")
 	qp.Q = u.Query().Get("q")
 	_, qp.Regex = u.Query()["regex"]
 
