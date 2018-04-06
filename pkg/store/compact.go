@@ -213,13 +213,40 @@ func (c *Compacter) emptyTrash() {
 	}
 }
 
-type TopicCompacters map[string]*Compacter
+// CompacterFactory returns a new Compacter for a Log.
+type CompacterFactory func(string, Log) *Compacter
 
-func (tc TopicCompacters) Ensure(t string, nc func() *Compacter) {
-	_, ok := tc[t]
-	if ok {
-		return
+// TopicCompacters runs compacters for a set of topic logs.
+type TopicCompacters struct {
+	topics TopicLogs
+	cfac   CompacterFactory
+	comps  map[string]*Compacter
+}
+
+// NewTopicCompacters returns a new TopicCompacter that creates new compacters with a factory.
+func NewTopicCompacters(topics TopicLogs, cfac CompacterFactory) *TopicCompacters {
+	return &TopicCompacters{
+		topics: topics,
+		cfac:   cfac,
+		comps:  map[string]*Compacter{},
 	}
-	c := nc()
-	tc[t] = c
+}
+
+// Next instantiates new compacters for new topics and runs the next compacter
+// step for all of them.
+func (tc *TopicCompacters) Next() error {
+	all, err := tc.topics.All()
+	if err != nil {
+		return err
+	}
+	// Ensure we have a compacter for all topics and run the next stage for each.
+	for t, l := range all {
+		if _, ok := tc.comps[t]; !ok {
+			tc.comps[t] = tc.cfac(t, l)
+		}
+	}
+	for _, c := range tc.comps {
+		c.Next()
+	}
+	return nil
 }

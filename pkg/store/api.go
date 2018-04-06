@@ -47,7 +47,7 @@ type Doer interface {
 type API struct {
 	peer               ClusterPeer
 	stagingLog         Log
-	topicLogs          *TopicLogs
+	topicLogs          TopicLogs
 	queryClient        Doer // should time out
 	streamClient       Doer // should not time out
 	streamQueries      *queryRegistry
@@ -61,7 +61,7 @@ type API struct {
 func NewAPI(
 	peer ClusterPeer,
 	stagingLog Log,
-	topicLogs *TopicLogs,
+	topicLogs TopicLogs,
 	queryClient, streamClient Doer,
 	replicatedSegments, replicatedBytes prometheus.Counter,
 	duration *prometheus.HistogramVec,
@@ -308,9 +308,13 @@ func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request) {
 		statsOnly = true
 	}
 
-	log, ok := a.topicLogs.Get(qp.Topic)
-	if !ok {
+	log, err := a.topicLogs.Get(qp.Topic)
+	if err == ErrTopicNotFound {
 		http.Error(w, "topic does not exist", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	result, err := log.Query(qp, statsOnly)

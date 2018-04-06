@@ -203,6 +203,13 @@ func runStore(args []string) error {
 	default:
 		return errors.Errorf("invalid -filesystem %q", *filesystem)
 	}
+	{
+		r, err := lockDir(fsys, *storePath)
+		if err != nil {
+			return err
+		}
+		defer r.Release()
+	}
 
 	stagingDir := filepath.Join(*storePath, "staging")
 	topicDir := filepath.Join(*storePath, "topic")
@@ -292,37 +299,18 @@ func runStore(args []string) error {
 		})
 	}
 
-	topicLogs := store.NewTopicLogs(func(t string) (store.Log, error) {
-		return store.NewFileLog(
+	topicLogs := func() store.TopicLogs {
+		return store.NewFileTopicLogs(
 			fsys,
-			filepath.Join(topicDir, t),
+			topicDir,
 			*segmentTargetSize,
 			*segmentBufferSize,
-			store.LogReporter{Logger: logger},
+			store.LogReporter{Logger: log.With(logger, "component", "TopicLogs")},
 		)
-	})
-	// Initialize logs for existing topics from disk.
-	topics, err := fsys.ReadDir(topicDir)
-	if err != nil {
-		return err
-	}
-	for _, t := range topics {
-		if t.IsDir() {
-			if _, err = topicLogs.GetOrCreate(t.Name()); err != nil {
-				return err
-			}
-		}
 	}
 	{
-		newSegment := func(t string) (store.WriteSegment, error) {
-			log, err := topicLogs.GetOrCreate(t)
-			if err != nil {
-				return nil, err
-			}
-			return log.Create()
-		}
 		// TODO(fabxc): track delay between staging and demux completion in a metric.
-		demux := store.NewDemuxer(stagingLog.Oldest, newSegment)
+		demux := store.NewDemuxer(stagingLog, topicLogs())
 		stopc := make(chan struct{})
 		tickr := time.NewTicker(time.Second)
 
@@ -343,33 +331,28 @@ func runStore(args []string) error {
 		})
 	}
 	{
-		tc := store.TopicCompacters{}
 		stopc := make(chan struct{})
 		tickr := time.NewTicker(time.Second)
+
+		cfac := func(t string, l store.Log) *store.Compacter {
+			return store.NewCompacter(
+				l,
+				*segmentTargetSize,
+				*segmentRetain,
+				*segmentPurge,
+				compactDuration,
+				trashedSegments,
+				purgedSegments,
+				store.LogReporter{Logger: log.With(logger, "component", "Compacter", "topic", t)},
+			)
+		}
+		compacters := store.NewTopicCompacters(topicLogs(), cfac)
 
 		g.Add(func() error {
 			for {
 				select {
 				case <-tickr.C:
-					// Ensure we have a compactor for each topic.
-					for t, l := range topicLogs.Clone() {
-						tc.Ensure(t, func() *store.Compacter {
-							return store.NewCompacter(
-								l,
-								*segmentTargetSize,
-								*segmentRetain,
-								*segmentPurge,
-								compactDuration,
-								trashedSegments,
-								purgedSegments,
-								store.LogReporter{Logger: log.With(logger, "component", "Compacter", "topic", t)},
-							)
-						})
-					}
-					// Run each compacters' next stage.
-					for _, c := range tc {
-						c.Next()
-					}
+					compacters.Next()
 				case <-stopc:
 					return nil
 				}
@@ -385,7 +368,7 @@ func runStore(args []string) error {
 			api := store.NewAPI(
 				peer,
 				stagingLog,
-				topicLogs,
+				topicLogs(),
 				timeoutClient,
 				unlimitedClient,
 				replicatedSegments.WithLabelValues("ingress"),

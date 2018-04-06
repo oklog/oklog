@@ -3,7 +3,6 @@ package store
 import (
 	"errors"
 	"io"
-	"sync"
 	"time"
 
 	"github.com/oklog/ulid"
@@ -81,51 +80,17 @@ type LogStats struct {
 	TrashedBytes    int64
 }
 
-// TopicLogs lazily gives access to per-topic logs.
-type TopicLogs struct {
-	newLog func(string) (Log, error)
-	mtx    sync.Mutex
-	m      map[string]Log
-}
+var ErrTopicNotFound = errors.New("topic not found")
 
-func NewTopicLogs(newLog func(string) (Log, error)) *TopicLogs {
-	return &TopicLogs{
-		newLog: newLog,
-		m:      map[string]Log{},
-	}
-}
+// TopicLogs manages Logs for multiple topics.
+type TopicLogs interface {
+	// Create a new WriteSegment for a topic.
+	Create(t string) (WriteSegment, error)
 
-func (tl *TopicLogs) Get(t string) (Log, bool) {
-	tl.mtx.Lock()
-	defer tl.mtx.Unlock()
+	// Return the Log for the topic. Returns ErrTopicNotFound if the topic
+	// has not been created yet.
+	Get(string) (Log, error)
 
-	l, ok := tl.m[t]
-	return l, ok
-}
-
-func (tl *TopicLogs) GetOrCreate(t string) (Log, error) {
-	tl.mtx.Lock()
-	defer tl.mtx.Unlock()
-
-	l, ok := tl.m[t]
-	if ok {
-		return l, nil
-	}
-	l, err := tl.newLog(t)
-	if err != nil {
-		return nil, err
-	}
-	tl.m[t] = l
-	return l, nil
-}
-
-func (tl *TopicLogs) Clone() map[string]Log {
-	tl.mtx.Lock()
-	defer tl.mtx.Unlock()
-
-	m := map[string]Log{}
-	for t, l := range tl.m {
-		m[t] = l
-	}
-	return m
+	// List returns a map of all topics and their logs.
+	All() (map[string]Log, error)
 }

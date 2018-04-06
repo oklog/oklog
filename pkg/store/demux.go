@@ -12,27 +12,27 @@ import (
 // Demuxer promotes mixed-topic segments from the staging area to sub-segments
 // in their respective topics.
 type Demuxer struct {
-	next       func() (ReadSegment, error)
-	newSegment func(string) (WriteSegment, error)
-	topics     map[string]Log
+	staging   Log
+	topicLogs TopicLogs
+	topics    map[string]Log
 }
 
 // NewDemuxer returns a new Demuxer with the given staging and topic paths.
 func NewDemuxer(
-	next func() (ReadSegment, error),
-	newSegment func(string) (WriteSegment, error),
+	staging Log,
+	topicsLogs TopicLogs,
 ) *Demuxer {
 	return &Demuxer{
-		next:       next,
-		newSegment: newSegment,
-		topics:     map[string]Log{},
+		staging:   staging,
+		topicLogs: topicsLogs,
+		topics:    map[string]Log{},
 	}
 }
 
 // Next looks for the next staging segment and demuxes it. It returns ErrNoSegmentFound
 // if no segments need to be demuxed.
 func (d *Demuxer) Next() (err error) {
-	s, err := d.next()
+	s, err := d.staging.Oldest()
 	if err == ErrNoSegmentsAvailable {
 		return nil
 	}
@@ -80,7 +80,7 @@ func (d *Demuxer) demux(s ReadSegment) (err error) {
 		}
 		e, ok := m[t]
 		if !ok {
-			s, err := d.newSegment(t)
+			s, err := d.topicLogs.Create(t)
 			if err != nil {
 				return err
 			}
