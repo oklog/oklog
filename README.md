@@ -114,13 +114,13 @@ To query structured logs, combine a basic grep filter expression with a tool lik
 
 ```sh
 $ oklog query -from 1h -q /api/v1/login
-2016-01-01 09:15:45 {"remote_addr":"10.34.115.3:50032","path":"/api/v1/login","method":"POST","status_code":200}
-2016-01-01 09:15:47 {"remote_addr":"10.9.101.113:51442","path":"/api/v1/login","method":"POST","status_code":500}
-2016-01-01 09:15:48 {"remote_addr":"10.9.55.2:55210","path":"/api/v1/login","method":"POST","status_code":200}
-2016-01-01 09:15:49 {"remote_addr":"10.34.115.1:51610","path":"/api/v1/login","method":"POST","status_code":200}
+{"remote_addr":"10.34.115.3:50032","path":"/api/v1/login","method":"POST","status_code":200}
+{"remote_addr":"10.9.101.113:51442","path":"/api/v1/login","method":"POST","status_code":500}
+{"remote_addr":"10.9.55.2:55210","path":"/api/v1/login","method":"POST","status_code":200}
+{"remote_addr":"10.34.115.1:51610","path":"/api/v1/login","method":"POST","status_code":200}
 ...
 
-$ oklog query -from 1h -q /api/v1/login | cut -d' ' -f3- | jq '. | select(.status_code == 500)'
+$ oklog query -from 1h -q /api/v1/login | jq '. | select(.status_code == 500)'
 {
 	"remote_addr": "10.9.55.2:55210",
 	"path": "/api/v1/login",
