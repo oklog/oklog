@@ -1,8 +1,6 @@
 package ingest
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -14,6 +12,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/oklog/oklog/pkg/record"
 	"github.com/oklog/ulid"
 )
 
@@ -22,7 +21,7 @@ import (
 func HandleConnections(
 	ln net.Listener,
 	h ConnectionHandler,
-	reader func(io.Reader) RecordReader,
+	rfac record.ReaderFactory,
 	log Log,
 	segmentFlushAge time.Duration,
 	segmentFlushSize int,
@@ -58,74 +57,18 @@ func HandleConnections(
 		m.register(conn)
 		go func() {
 			defer conn.Close()
-			h(reader(conn), w, idGen, connectedClients)
+			h(rfac(conn), w, idGen, connectedClients)
 			w.Stop() // make sure it's flushed
 			m.remove(conn)
 		}()
 	}
 }
 
-// ErrIllegalTopicFormat is returned if a record did not start with a proper topic prefix.
-var ErrIllegalTopicFormat = errors.New("illegal topic formatting")
-
-// RecordReader emits records that are prefixed with a topic.
-// It returns io.EOF if the underlying record source has no more data.
-type RecordReader func() (record []byte, err error)
-
-// NewDynamicRecordReader returns a record reader that expects each input record from r
-// to start with a space-delimited topic identifier.
-func NewDynamicRecordReader(r io.Reader) RecordReader {
-	br := bufio.NewReader(r)
-
-	return func() ([]byte, error) {
-		l, err := br.ReadBytes('\n')
-		if err != nil {
-			return nil, err
-		}
-		// Validate that a correct topic prefix exists.
-		if i := bytes.IndexByte(l, ' '); i < 0 || !isValidTopic(l[:i]) {
-			return nil, ErrIllegalTopicFormat
-		}
-		return l, nil
-	}
-}
-
-// NewStaticRecordReader returns a record reader that prefixes all input records
-// with a static topic.
-func NewStaticRecordReader(topic string, r io.Reader) (RecordReader, error) {
-	tb := []byte(topic)
-	if !isValidTopic(tb) {
-		return nil, ErrIllegalTopicFormat
-	}
-	tb = append(tb, ' ')
-	br := bufio.NewReader(r)
-
-	return func() ([]byte, error) {
-		l, err := br.ReadBytes('\n')
-		if err != nil {
-			return nil, err
-		}
-		return append(tb, l...), nil
-	}, nil
-}
-
-// isValidTopic ensures that the a topic only contains allowed characters. It implements
-// the regex [a-zA-Z0-9_-]+
-// It takes a byte slice to avoid memory allocations at the caller.
-func isValidTopic(b []byte) bool {
-	for _, c := range b {
-		if !(c == '_' || c == '-' || ('0' <= c && c <= '9') || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')) {
-			return false
-		}
-	}
-	return len(b) > 0
-}
-
 // ConnectionHandler forwards records from the net.Conn to the IngestLog.
-type ConnectionHandler func(r RecordReader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) error
+type ConnectionHandler func(r record.Reader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) error
 
 // HandleFastWriter is a ConnectionHandler that writes records to the IngestLog.
-func HandleFastWriter(r RecordReader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
+func HandleFastWriter(r record.Reader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
 	connectedClients.Inc()
 	defer connectedClients.Dec()
 
@@ -146,7 +89,7 @@ func HandleFastWriter(r RecordReader, w *Writer, idGen IDGenerator, connectedCli
 
 // HandleDurableWriter is a ConnectionHandler that writes records to the
 // IngestLog and syncs after each record.
-func HandleDurableWriter(r RecordReader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
+func HandleDurableWriter(r record.Reader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
 	connectedClients.Inc()
 	defer connectedClients.Dec()
 
@@ -170,7 +113,7 @@ func HandleDurableWriter(r RecordReader, w *Writer, idGen IDGenerator, connected
 
 // HandleBulkWriter is a ConnectionHandler that writes an entire segment to the
 // IngestLog at once.
-func HandleBulkWriter(r RecordReader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
+func HandleBulkWriter(r record.Reader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
 	return errors.New("TODO(pb): not implemented")
 }
 

@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -21,6 +20,7 @@ import (
 	"github.com/oklog/oklog/pkg/fs"
 	"github.com/oklog/oklog/pkg/group"
 	"github.com/oklog/oklog/pkg/ingest"
+	"github.com/oklog/oklog/pkg/record"
 )
 
 const (
@@ -33,8 +33,8 @@ const (
 )
 
 const (
-	topicModeStatic = "static"
-	topicModePrefix = "prefix"
+	topicModeStatic  = "static"
+	topicModeDynamic = "dynamic"
 )
 
 var (
@@ -283,14 +283,18 @@ func runIngest(args []string) error {
 		Help:      "Number of peers in the cluster from this node's perspective.",
 	}, func() float64 { return float64(peer.ClusterSize()) }))
 
-	recordRdr := ingest.NewDynamicRecordReader
-	if *topicMode == topicModeStatic {
-		recordRdr = func(r io.Reader) ingest.RecordReader {
-			rr, err := ingest.NewStaticRecordReader(*topic, r)
-			if err != nil {
-				panic(err)
-			}
-			return rr
+	var rfac record.ReaderFactory
+	{
+		topicb := []byte(*topic)
+		switch {
+		case *topicMode == topicModeDynamic:
+			rfac = record.NewDynamicReader
+		case *topicMode == topicModeStatic && record.IsValidTopic(topicb):
+			rfac = record.StaticReaderFactory(topicb)
+		case *topicMode == topicModeStatic && !record.IsValidTopic(topicb):
+			return fmt.Errorf("topic name %q invalid", *topic)
+		default:
+			return fmt.Errorf("topic mode %q invalid, must be %q or %q", *topicMode, topicModeStatic, topicModeDynamic)
 		}
 	}
 
@@ -310,7 +314,7 @@ func runIngest(args []string) error {
 			return ingest.HandleConnections(
 				fastListener,
 				ingest.HandleFastWriter,
-				recordRdr,
+				rfac,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("fast"),
@@ -324,7 +328,7 @@ func runIngest(args []string) error {
 			return ingest.HandleConnections(
 				durableListener,
 				ingest.HandleDurableWriter,
-				recordRdr,
+				rfac,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("durable"),
@@ -338,7 +342,7 @@ func runIngest(args []string) error {
 			return ingest.HandleConnections(
 				bulkListener,
 				ingest.HandleBulkWriter,
-				recordRdr,
+				rfac,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("bulk"),
