@@ -74,6 +74,39 @@ func (fs *virtualFilesystem) Exists(path string) bool {
 	return ok
 }
 
+func (fs *virtualFilesystem) ReadDir(dirname string) ([]os.FileInfo, error) {
+	fs.mtx.Lock()
+	defer fs.mtx.Unlock()
+
+	res := map[string]os.FileInfo{}
+	dirname = strings.TrimRight(dirname, "/") + "/"
+
+	for n, f := range fs.files {
+		if !strings.HasPrefix(n, dirname) {
+			continue
+		}
+		n = strings.TrimPrefix(n, dirname)
+		if strings.Contains(n, "/") {
+			n = n[:strings.IndexByte(n, '/')]
+			res[n] = virtualFileInfo{name: n, isDir: true}
+			continue
+		}
+		res[n] = virtualFileInfo{
+			name:  f.name,
+			size:  int64(f.buf.Len()),
+			mtime: f.mtime,
+		}
+	}
+	if len(res) == 0 {
+		return nil, os.ErrNotExist
+	}
+	var s []os.FileInfo
+	for _, fi := range res {
+		s = append(s, fi)
+	}
+	return s, nil
+}
+
 func (fs *virtualFilesystem) MkdirAll(path string) error {
 	return nil
 }
@@ -171,14 +204,21 @@ type virtualFileInfo struct {
 	name  string
 	size  int64
 	mtime time.Time
+	isDir bool
 }
 
 func (fi virtualFileInfo) Name() string       { return fi.name }
 func (fi virtualFileInfo) Size() int64        { return fi.size }
-func (fi virtualFileInfo) Mode() os.FileMode  { return os.FileMode(0666) }
 func (fi virtualFileInfo) ModTime() time.Time { return fi.mtime }
-func (fi virtualFileInfo) IsDir() bool        { return false }
+func (fi virtualFileInfo) IsDir() bool        { return fi.isDir }
 func (fi virtualFileInfo) Sys() interface{}   { return nil }
+
+func (fi virtualFileInfo) Mode() os.FileMode {
+	if fi.isDir {
+		return os.FileMode(0777)
+	}
+	return os.FileMode(0666)
+}
 
 type virtualReleaser func() error
 

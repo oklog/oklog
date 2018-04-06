@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"os"
 	"path/filepath"
 	"time"
 )
@@ -17,6 +18,7 @@ func (nopFilesystem) Open(path string) (File, error)                    { return
 func (nopFilesystem) Remove(path string) error                          { return nil }
 func (nopFilesystem) Rename(oldname, newname string) error              { return nil }
 func (nopFilesystem) Exists(path string) bool                           { return false }
+func (nopFilesystem) ReadDir(dirname string) ([]os.FileInfo, error)     { return nil, nil }
 func (nopFilesystem) MkdirAll(path string) error                        { return nil }
 func (nopFilesystem) Chtimes(path string, atime, mtime time.Time) error { return nil }
 func (nopFilesystem) Walk(root string, walkFn filepath.WalkFunc) error  { return nil }

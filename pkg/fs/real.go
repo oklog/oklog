@@ -2,6 +2,7 @@ package fs
 
 import (
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,6 +53,10 @@ func (realFilesystem) Rename(oldname, newname string) error {
 func (realFilesystem) Exists(path string) bool {
 	_, err := os.Stat(path)
 	return !os.IsNotExist(err)
+}
+
+func (realFilesystem) ReadDir(dirname string) ([]os.FileInfo, error) {
+	return ioutil.ReadDir(dirname)
 }
 
 func (realFilesystem) MkdirAll(path string) error {
