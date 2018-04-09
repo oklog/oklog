@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"bufio"
 	"bytes"
 	cryptorand "crypto/rand"
 	"encoding/binary"
@@ -20,6 +19,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/oklog/oklog/pkg/fs"
+	"github.com/oklog/oklog/pkg/record"
 )
 
 func TestHandleConnectionsCleanup(t *testing.T) {
@@ -53,7 +53,7 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 	)
 	go func() {
 		errc <- HandleConnections(
-			ln, connectionHandler, log, segmentFlushAge, segmentFlushSize,
+			ln, connectionHandler, record.NewDynamicReader, log, segmentFlushAge, segmentFlushSize,
 			connectedClients, bytes, records, syncs, segmentAge, segmentSize,
 		)
 	}()
@@ -69,7 +69,7 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 	}
 
 	// Write something to make sure the connection is good.
-	message := "hello, world!\n"
+	message := "test_topic hello, world!\n"
 	if n, err := fmt.Fprint(conn, message); err != nil {
 		t.Fatal(err)
 	} else if want, have := len(message), n; want != have {
@@ -110,13 +110,17 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 }
 
 func echo(t *testing.T) ConnectionHandler {
-	return func(conn net.Conn, w *Writer, _ IDGenerator, _ prometheus.Gauge) error {
-		s := bufio.NewScanner(conn)
-		for s.Scan() {
-			t.Logf("RECV> %s", s.Text())
-			fmt.Fprintln(w, s.Text())
+	return func(read record.Reader, w *Writer, _ IDGenerator, _ prometheus.Gauge) error {
+		for {
+			r, err := read()
+			if err == io.EOF {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			t.Logf("RECV> %s", r)
+			fmt.Fprintln(w, r)
 		}
-		return s.Err()
 	}
 }
 

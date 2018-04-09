@@ -19,6 +19,7 @@ import (
 	"github.com/oklog/oklog/pkg/fs"
 	"github.com/oklog/oklog/pkg/group"
 	"github.com/oklog/oklog/pkg/ingest"
+	"github.com/oklog/oklog/pkg/record"
 	"github.com/oklog/oklog/pkg/store"
 	"github.com/oklog/oklog/pkg/ui"
 )
@@ -28,6 +29,8 @@ func runIngestStore(args []string) error {
 	var (
 		debug                    = flagset.Bool("debug", false, "debug logging")
 		apiAddr                  = flagset.String("api", defaultAPIAddr, "listen address for ingest and store APIs")
+		topicMode                = flagset.String("ingest.topic-mode", topicModeStatic, "topic mode for ingested records (static, dynamic)")
+		topic                    = flagset.String("ingest.topic", "default", "static topic name (requires -topic-mode=static)")
 		fastAddr                 = flagset.String("ingest.fast", defaultFastAddr, "listen address for fast (async) writes")
 		durableAddr              = flagset.String("ingest.durable", defaultDurableAddr, "listen address for durable (sync) writes")
 		bulkAddr                 = flagset.String("ingest.bulk", defaultBulkAddr, "listen address for bulk (whole-segment) writes")
@@ -355,6 +358,21 @@ func runIngestStore(args []string) error {
 		},
 	}
 
+	var rfac record.ReaderFactory
+	{
+		topicb := []byte(*topic)
+		switch {
+		case *topicMode == topicModeDynamic:
+			rfac = record.NewDynamicReader
+		case *topicMode == topicModeStatic && record.IsValidTopic(topicb):
+			rfac = record.StaticReaderFactory(topicb)
+		case *topicMode == topicModeStatic && !record.IsValidTopic(topicb):
+			return fmt.Errorf("topic name %q invalid", *topic)
+		default:
+			return fmt.Errorf("topic mode %q invalid, must be %q or %q", *topicMode, topicModeStatic, topicModeDynamic)
+		}
+	}
+
 	// Execution group.
 	var g group.Group
 	{
@@ -371,6 +389,7 @@ func runIngestStore(args []string) error {
 			return ingest.HandleConnections(
 				fastListener,
 				ingest.HandleFastWriter,
+				rfac,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("fast"),
@@ -384,6 +403,7 @@ func runIngestStore(args []string) error {
 			return ingest.HandleConnections(
 				durableListener,
 				ingest.HandleDurableWriter,
+				rfac,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("durable"),
@@ -397,6 +417,7 @@ func runIngestStore(args []string) error {
 			return ingest.HandleConnections(
 				bulkListener,
 				ingest.HandleBulkWriter,
+				rfac,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("bulk"),

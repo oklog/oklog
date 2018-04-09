@@ -1,11 +1,10 @@
 package ingest
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"sync"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/oklog/oklog/pkg/record"
 	"github.com/oklog/ulid"
 )
 
@@ -21,6 +21,7 @@ import (
 func HandleConnections(
 	ln net.Listener,
 	h ConnectionHandler,
+	rfac record.ReaderFactory,
 	log Log,
 	segmentFlushAge time.Duration,
 	segmentFlushSize int,
@@ -55,7 +56,8 @@ func HandleConnections(
 		// In either case, the writer is closed.
 		m.register(conn)
 		go func() {
-			h(conn, w, idGen, connectedClients)
+			defer conn.Close()
+			h(rfac(conn), w, idGen, connectedClients)
 			w.Stop() // make sure it's flushed
 			m.remove(conn)
 		}()
@@ -63,67 +65,60 @@ func HandleConnections(
 }
 
 // ConnectionHandler forwards records from the net.Conn to the IngestLog.
-type ConnectionHandler func(conn net.Conn, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) error
+type ConnectionHandler func(r record.Reader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) error
 
 // HandleFastWriter is a ConnectionHandler that writes records to the IngestLog.
-func HandleFastWriter(conn net.Conn, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
+func HandleFastWriter(r record.Reader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
 	connectedClients.Inc()
 	defer connectedClients.Dec()
-	defer conn.Close()
-	s := bufio.NewScanner(conn)
-	s.Split(scanLinesPreserveNewline)
-	for s.Scan() {
+
+	for {
+		record, err := r()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		// TODO(pb): short writes are possible
-		if _, err := fmt.Fprintf(w, "%s %s", idGen(), s.Text()); err != nil {
+		if _, err := fmt.Fprintf(w, "%s %s", idGen(), record); err != nil {
 			return err
 		}
 	}
-	return s.Err()
 }
 
 // HandleDurableWriter is a ConnectionHandler that writes records to the
 // IngestLog and syncs after each record.
-func HandleDurableWriter(conn net.Conn, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
+func HandleDurableWriter(r record.Reader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
 	connectedClients.Inc()
 	defer connectedClients.Dec()
-	defer conn.Close()
-	s := bufio.NewScanner(conn)
-	s.Split(scanLinesPreserveNewline)
-	for s.Scan() {
+
+	for {
+		record, err := r()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		// TODO(pb): short writes are possible
-		if _, err := fmt.Fprintf(w, "%s %s", idGen(), s.Text()); err != nil {
+		if _, err := fmt.Fprintf(w, "%s %s", idGen(), record); err != nil {
 			return err
 		}
 		if err := w.Sync(); err != nil {
 			return err
 		}
 	}
-	return s.Err()
 }
 
 // HandleBulkWriter is a ConnectionHandler that writes an entire segment to the
 // IngestLog at once.
-func HandleBulkWriter(conn net.Conn, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
-	conn.Close()
+func HandleBulkWriter(r record.Reader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) (err error) {
 	return errors.New("TODO(pb): not implemented")
 }
 
 // IDGenerator should return unique record identifiers, i.e. ULIDs.
 type IDGenerator func() string
-
-// Like bufio.ScanLines, but retain the \n.
-func scanLinesPreserveNewline(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	if atEOF && len(data) == 0 {
-		return 0, nil, nil
-	}
-	if i := bytes.IndexByte(data, '\n'); i >= 0 {
-		return i + 1, data[0 : i+1], nil
-	}
-	if atEOF {
-		return len(data), data, nil
-	}
-	return 0, nil, nil
-}
 
 func newConnectionManager() *connectionManager {
 	return &connectionManager{

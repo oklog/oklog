@@ -20,6 +20,7 @@ import (
 	"github.com/oklog/oklog/pkg/fs"
 	"github.com/oklog/oklog/pkg/group"
 	"github.com/oklog/oklog/pkg/ingest"
+	"github.com/oklog/oklog/pkg/record"
 )
 
 const (
@@ -29,6 +30,11 @@ const (
 	defaultIngestSegmentFlushSize      = 16 * 1024 * 1024
 	defaultIngestSegmentFlushAge       = 3 * time.Second
 	defaultIngestSegmentPendingTimeout = time.Minute
+)
+
+const (
+	topicModeStatic  = "static"
+	topicModeDynamic = "dynamic"
 )
 
 var (
@@ -42,6 +48,8 @@ func runIngest(args []string) error {
 	flagset := flag.NewFlagSet("ingest", flag.ExitOnError)
 	var (
 		debug                 = flagset.Bool("debug", false, "debug logging")
+		topicMode             = flagset.String("topic-mode", topicModeStatic, "topic mode for ingested records (static, prefix)")
+		topic                 = flagset.String("topic", "default", "static topic name (requires -topic-mode=static)")
 		apiAddr               = flagset.String("api", defaultAPIAddr, "listen address for ingest API")
 		fastAddr              = flagset.String("ingest.fast", defaultFastAddr, "listen address for fast (async) writes")
 		durableAddr           = flagset.String("ingest.durable", defaultDurableAddr, "listen address for durable (sync) writes")
@@ -245,10 +253,12 @@ func runIngest(args []string) error {
 	default:
 		return errors.Errorf("invalid -filesystem %q", *filesystem)
 	}
+
 	ingestLog, err := ingest.NewFileLog(fsys, *ingestPath)
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		if err := ingestLog.Close(); err != nil {
 			level.Error(logger).Log("err", err)
@@ -273,6 +283,21 @@ func runIngest(args []string) error {
 		Help:      "Number of peers in the cluster from this node's perspective.",
 	}, func() float64 { return float64(peer.ClusterSize()) }))
 
+	var rfac record.ReaderFactory
+	{
+		topicb := []byte(*topic)
+		switch {
+		case *topicMode == topicModeDynamic:
+			rfac = record.NewDynamicReader
+		case *topicMode == topicModeStatic && record.IsValidTopic(topicb):
+			rfac = record.StaticReaderFactory(topicb)
+		case *topicMode == topicModeStatic && !record.IsValidTopic(topicb):
+			return fmt.Errorf("topic name %q invalid", *topic)
+		default:
+			return fmt.Errorf("topic mode %q invalid, must be %q or %q", *topicMode, topicModeStatic, topicModeDynamic)
+		}
+	}
+
 	// Execution group.
 	var g group.Group
 	{
@@ -289,6 +314,7 @@ func runIngest(args []string) error {
 			return ingest.HandleConnections(
 				fastListener,
 				ingest.HandleFastWriter,
+				rfac,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("fast"),
@@ -302,6 +328,7 @@ func runIngest(args []string) error {
 			return ingest.HandleConnections(
 				durableListener,
 				ingest.HandleDurableWriter,
+				rfac,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("durable"),
@@ -315,6 +342,7 @@ func runIngest(args []string) error {
 			return ingest.HandleConnections(
 				bulkListener,
 				ingest.HandleBulkWriter,
+				rfac,
 				ingestLog,
 				*segmentFlushAge, *segmentFlushSize,
 				connectedClients.WithLabelValues("bulk"),
