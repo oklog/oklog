@@ -64,9 +64,6 @@ func HandleConnections(
 	}
 }
 
-// ErrIllegalTopicFormat is returned if a record did not start with a proper topic prefix.
-var ErrIllegalTopicFormat = errors.New("illegal topic formatting")
-
 // ConnectionHandler forwards records from the net.Conn to the IngestLog.
 type ConnectionHandler func(r record.Reader, w *Writer, idGen IDGenerator, connectedClients prometheus.Gauge) error
 

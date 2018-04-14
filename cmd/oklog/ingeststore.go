@@ -482,24 +482,14 @@ func runIngestStore(args []string) error {
 	}
 	{
 		// TODO(fabxc): track delay between staging and demux completion in a metric.
-		demux := store.NewDemuxer(stagingLog, topicLogs())
-		stopc := make(chan struct{})
-		tickr := time.NewTicker(time.Second)
+		reporter := store.LogReporter{Logger: log.With(logger, "component", "Demuxer")}
+		demux := store.NewDemuxer(stagingLog, topicLogs(), reporter)
 
 		g.Add(func() error {
-			for {
-				select {
-				case <-stopc:
-					return nil
-				case <-tickr.C:
-					if err := demux.Next(); err != nil {
-						level.Error(logger).Log("msg", "demux failed", "err", err)
-					}
-				}
-			}
+			demux.Run(1 * time.Second)
+			return nil
 		}, func(error) {
-			close(stopc)
-			tickr.Stop()
+			demux.Stop()
 		})
 	}
 	{

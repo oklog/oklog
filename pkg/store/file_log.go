@@ -128,7 +128,8 @@ func (fl *fileLog) Oldest() (ReadSegment, error) {
 	if chosen == "" {
 		return nil, ErrNoSegmentsAvailable
 	}
-	return newFileReadSegment(fl.filesys, chosen)
+	s, err := newFileReadSegment(fl.filesys, chosen)
+	return s, err
 }
 
 func (fl *fileLog) Overlapping() ([]ReadSegment, error) {
@@ -450,6 +451,10 @@ func (ft *fileTopicLogs) All() (map[string]Log, error) {
 		m[t] = l
 	}
 	return m, nil
+}
+
+func (ft *fileTopicLogs) Close() error {
+	return nil
 }
 
 func recoverSegments(filesys fs.Filesystem, root string) error {

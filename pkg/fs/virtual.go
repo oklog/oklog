@@ -63,6 +63,7 @@ func (fs *virtualFilesystem) Rename(oldname, newname string) error {
 		return os.ErrNotExist
 	}
 	delete(fs.files, oldname)
+	f.name = newname
 	fs.files[newname] = f // potentially destructive to newname!
 	return nil
 }
@@ -70,8 +71,18 @@ func (fs *virtualFilesystem) Rename(oldname, newname string) error {
 func (fs *virtualFilesystem) Exists(path string) bool {
 	fs.mtx.Lock()
 	defer fs.mtx.Unlock()
-	_, ok := fs.files[path]
-	return ok
+	// Exact file exists.
+	if _, ok := fs.files[path]; ok {
+		return true
+	}
+	// Check if implicit directory exists.
+	path = strings.TrimRight(path, "/") + "/"
+	for fn := range fs.files {
+		if strings.HasPrefix(fn, path) {
+			return true
+		}
+	}
+	return false
 }
 
 func (fs *virtualFilesystem) ReadDir(dirname string) ([]os.FileInfo, error) {

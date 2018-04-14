@@ -91,6 +91,8 @@ type TopicLogs interface {
 	// has not been created yet.
 	Get(string) (Log, error)
 
-	// List returns a map of all topics and their logs.
+	// All returns a map of all topics and their logs.
 	All() (map[string]Log, error)
+
+	Close() error
 }

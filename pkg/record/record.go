@@ -17,6 +17,14 @@ type Reader func() (record []byte, err error)
 // RecordReaderFactory returns a new RecordReader backed by the given reader.
 type ReaderFactory func(io.Reader) Reader
 
+func NewReader(r io.Reader) Reader {
+	br := bufio.NewReader(r)
+
+	return func() ([]byte, error) {
+		return br.ReadBytes('\n')
+	}
+}
+
 // NewDynamicReader returns a record reader that expects each input record from r
 // to start with a space-delimited topic identifier.
 func NewDynamicReader(r io.Reader) Reader {

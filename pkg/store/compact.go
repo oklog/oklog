@@ -17,7 +17,6 @@ type Compacter struct {
 	segmentTargetSize int64
 	retain            time.Duration
 	purge             time.Duration
-	stop              chan chan struct{}
 	compactDuration   *prometheus.HistogramVec
 	trashSegments     *prometheus.CounterVec
 	purgeSegments     *prometheus.CounterVec
@@ -39,7 +38,6 @@ func NewCompacter(
 		segmentTargetSize: segmentTargetSize,
 		retain:            retain,
 		purge:             purge,
-		stop:              make(chan chan struct{}),
 		trashSegments:     trashSegments,
 		purgeSegments:     purgeSegments,
 		compactDuration:   compactDuration,
@@ -54,46 +52,10 @@ func NewCompacter(
 	return c
 }
 
+// Next runs the next compacter stage.
 func (c *Compacter) Next() {
 	c.ops[0]()
 	c.ops = append(c.ops[1:], c.ops[0])
-}
-
-// Run performs compactions and cleanups.
-// Run returns when Stop is invoked.
-func (c *Compacter) Run() {
-	ops := []func(){
-		func() { c.compact("Overlapping", c.log.Overlapping) },
-		func() { c.compact("Sequential", c.log.Sequential) },
-		func() { c.moveToTrash() },
-		func() { c.emptyTrash() },
-	}
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			ops[0]()                      // execute
-			ops = append(ops[1:], ops[0]) // shift
-
-		case q := <-c.stop:
-			close(q)
-			return
-		}
-	}
-}
-
-// Stop the compacter from compacting.
-func (c *Compacter) Stop() {
-	defer func(begin time.Time) {
-		c.reporter.ReportEvent(Event{
-			Debug: true, Op: "Stop",
-			Msg: fmt.Sprintf("shutdown took %s", time.Since(begin)),
-		})
-	}(time.Now())
-	q := make(chan struct{})
-	c.stop <- q
-	<-q
 }
 
 func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, error)) (compacted int, result string) {

@@ -9,7 +9,6 @@ import (
 	"math"
 	mathrand "math/rand"
 	"net"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,7 +29,7 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 
 	// Set up a file log using our mock FS.
 	// The mock FS counts file closures.
-	fs := &mockFilesystem{}
+	fs := newMockFilesystem()
 	log, err := NewFileLog(fs, "/")
 	if err != nil {
 		t.Fatal(err)
@@ -134,17 +133,17 @@ func within(d time.Duration, f func() bool) bool {
 	return false
 }
 
-type mockFilesystem struct{ wr, cl uint64 }
+type mockFilesystem struct {
+	fs.Filesystem
+	wr, cl uint64
+}
 
-func (fs *mockFilesystem) Create(path string) (fs.File, error)               { return &mockFile{&fs.wr, &fs.cl}, nil }
-func (fs *mockFilesystem) Open(path string) (fs.File, error)                 { return &mockFile{&fs.wr, &fs.cl}, nil }
-func (fs *mockFilesystem) Remove(path string) error                          { return nil }
-func (fs *mockFilesystem) Rename(oldname, newname string) error              { return nil }
-func (fs *mockFilesystem) Exists(path string) bool                           { return false }
-func (fs *mockFilesystem) MkdirAll(path string) error                        { return nil }
-func (fs *mockFilesystem) Chtimes(path string, atime, mtime time.Time) error { return nil }
-func (fs *mockFilesystem) Walk(root string, walkFn filepath.WalkFunc) error  { return nil }
-func (fs *mockFilesystem) Lock(string) (fs.Releaser, bool, error)            { return mockReleaser{}, false, nil }
+func newMockFilesystem() *mockFilesystem {
+	return &mockFilesystem{Filesystem: fs.NewNopFilesystem()}
+}
+
+func (fs *mockFilesystem) Create(path string) (fs.File, error) { return &mockFile{&fs.wr, &fs.cl}, nil }
+func (fs *mockFilesystem) Open(path string) (fs.File, error)   { return &mockFile{&fs.wr, &fs.cl}, nil }
 
 type mockFile struct{ wr, cl *uint64 }
 
@@ -154,10 +153,6 @@ func (f *mockFile) Close() error                { atomic.AddUint64(f.cl, 1); ret
 func (f *mockFile) Name() string                { return "" }
 func (f *mockFile) Size() int64                 { return 0 }
 func (f *mockFile) Sync() error                 { return nil }
-
-type mockReleaser struct{}
-
-func (mockReleaser) Release() error { return nil }
 
 func TestStreamClock(t *testing.T) {
 	sc := newStreamClock()
