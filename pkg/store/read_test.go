@@ -557,6 +557,10 @@ func (log *mockLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 	return QueryResult{}, errors.New("not implemented")
 }
 
+func (log *mockLog) Oldest() (ReadSegment, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (log *mockLog) Overlapping() ([]ReadSegment, error) {
 	return nil, errors.New("not implemented")
 }

@@ -9,12 +9,14 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
 
+	"github.com/oklog/oklog/pkg/fs"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -204,4 +206,11 @@ func isUnroutable(addr string) bool {
 		return true
 	}
 	return false
+}
+
+const lockFile = "LOCK"
+
+func lockDir(fsys fs.Filesystem, dir string) (fs.Releaser, error) {
+	r, _, err := fsys.Lock(filepath.Join(dir, lockFile))
+	return r, err
 }

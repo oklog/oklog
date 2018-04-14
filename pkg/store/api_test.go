@@ -57,82 +57,57 @@ func TestTeeRecords(t *testing.T) {
 	}
 }
 
-func TestAPIInternalQueryFromULID(t *testing.T) {
+func TestAPIReplicateAndQuery(t *testing.T) {
 	t.Parallel()
 
-	a, err := newFixtureAPI(t)
+	var (
+		filesys       = fs.NewVirtualFilesystem()
+		baseLogger    = log.NewLogfmtLogger(os.Stderr)
+		logReporter   = LogReporter{log.With(baseLogger, "component", "FileLog")}
+		demuxReporter = LogReporter{log.With(baseLogger, "component", "Demuxer")}
+	)
+	stageLog, err := NewFileLog(filesys, "/stage", 10240, 1024, logReporter)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer a.Close()
+	defer stageLog.Close()
 
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", fmt.Sprintf(
-		"%s?from=%s&to=%s",
-		APIPathInternalQuery,
-		"01BB6RT5GR0000000000000000", // Just a bit before C
-		"01BB6RWTY70000000000000000", // Just a bit after G
-	), nil)
-	a.ServeHTTP(w, r)
-	if w.Code != http.StatusOK {
-		t.Errorf("Query failed: HTTP %d: %s", w.Code, strings.TrimSpace(w.Body.String()))
-	}
-	if want, have := recordC+recordD+recordE+recordF+recordG, w.Body.String(); want != have {
-		t.Errorf("Results: want:\n%s\nhave:\n%s", want, have)
-	}
-}
-
-var (
-	recordA  = "01BB6RQR190000000000000000 A 2017-03-14T16:59:40.585457189+01:00\n"
-	recordB  = "01BB6RRTB70000000000000000 B 2017-03-14T17:00:15.719316824+01:00\n"
-	recordC  = "01BB6RT5GS0000000000000000 C 2017-03-14T17:00:59.929816245+01:00\n"
-	recordD  = "01BB6RV5R00000000000000000 D 2017-03-14T17:01:32.928453488+01:00\n"
-	recordE  = "01BB6RVR490000000000000000 E 2017-03-14T17:01:51.753613999+01:00\n"
-	recordF  = "01BB6RW6C60000000000000000 F 2017-03-14T17:02:06.342946304+01:00\n"
-	recordG  = "01BB6RWTY60000000000000000 G 2017-03-14T17:02:27.398068977+01:00\n"
-	recordH  = "01BB6RX9D30000000000000000 H 2017-03-14T17:02:42.211235645+01:00\n"
-	recordI  = "01BB6RXQ090000000000000000 I 2017-03-14T17:02:56.137528308+01:00\n"
-	segments = []string{
-		recordA + recordB + recordC, // first segment
-		recordD + recordE + recordF, // second segment
-		recordG + recordH + recordI, // third segment
-	}
-)
-
-func newFixtureAPI(t *testing.T) (*API, error) {
-	// Loggers.
-	var (
-		baseLogger  = log.NewLogfmtLogger(os.Stderr)
-		logReporter = LogReporter{log.With(baseLogger, "component", "FileLog")}
-		apiReporter = LogReporter{log.With(baseLogger, "component", "API")}
-	)
-
-	// Construct a virtual file log.
-	filesys := fs.NewVirtualFilesystem()
-	filelog, err := NewFileLog(filesys, "/", 10240, 1024, logReporter)
+	topicLogs, err := NewFileTopicLogs(filesys, "/topics", 10240, 1024, logReporter)
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
+	defer topicLogs.Close()
 
-	// Build an API around that file log.
 	var (
-		peer               = mockClusterPeer{}
-		queryClient        = mockDoer{}
-		streamClient       = mockDoer{}
-		replicatedSegments = prometheus.NewCounter(prometheus.CounterOpts{})
-		replicatedBytes    = prometheus.NewCounter(prometheus.CounterOpts{})
-		duration           = prometheus.NewHistogramVec(prometheus.HistogramOpts{}, []string{"method", "path", "status_code"})
-		a                  = NewAPI(peer, filelog, queryClient, streamClient, replicatedSegments, replicatedBytes, duration, apiReporter)
+		demux = NewDemuxer(stageLog, topicLogs, demuxReporter)
+		api   = newFixtureAPI(filesys, stageLog, topicLogs)
+	)
+	defer api.Close()
+
+	var (
+		recordA  = "01BB6RQR190000000000000000 topicA A 2017-03-14T16:59:40.585457189+01:00\n"
+		recordB  = "01BB6RRTB70000000000000000 topicB B 2017-03-14T17:00:15.719316824+01:00\n"
+		recordC  = "01BB6RT5GS0000000000000000 topicC C 2017-03-14T17:00:59.929816245+01:00\n"
+		recordD  = "01BB6RV5R00000000000000000 topicA D 2017-03-14T17:01:32.928453488+01:00\n"
+		recordE  = "01BB6RVR490000000000000000 topicB E 2017-03-14T17:01:51.753613999+01:00\n"
+		recordF  = "01BB6RW6C60000000000000000 topicC F 2017-03-14T17:02:06.342946304+01:00\n"
+		recordG  = "01BB6RWTY60000000000000000 topicA G 2017-03-14T17:02:27.398068977+01:00\n"
+		recordH  = "01BB6RX9D30000000000000000 topicB H 2017-03-14T17:02:42.211235645+01:00\n"
+		recordI  = "01BB6RXQ090000000000000000 topicC I 2017-03-14T17:02:56.137528308+01:00\n"
+		segments = []string{
+			recordA + recordB + recordC, // first segment
+			recordD + recordE + recordF, // second segment
+			recordG + recordH + recordI, // third segment
+		}
 	)
 
 	// Populate the store via the replicate API.
 	for i, segment := range segments {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", APIPathReplicate, strings.NewReader(segment))
-		a.ServeHTTP(w, r)
+		api.ServeHTTP(w, r)
 		if w.Code != http.StatusOK {
-			a.Close()
-			return nil, fmt.Errorf("Replicate %d failed: HTTP %d (%s)", i, w.Code, strings.TrimSpace(w.Body.String()))
+			t.Fatalf("Replicate %d failed: HTTP %d (%s)", i, w.Code, strings.TrimSpace(w.Body.String()))
 		}
 	}
 
@@ -142,8 +117,68 @@ func newFixtureAPI(t *testing.T) (*API, error) {
 		return nil
 	})
 
-	// Return the populated API.
-	return a, nil
+	// Move records from staging log to topics.
+	t.Logf("Demux all")
+	for {
+		err := demux.next()
+		if err == ErrNoSegmentsAvailable {
+			break
+		}
+		if err != nil {
+			t.Fatalf("demux failed: %s", err)
+		}
+	}
+
+	// Debug: dump the filesys.
+	filesys.Walk("/", func(path string, info os.FileInfo, err error) error {
+		t.Logf("Debug: Walk: %s (%dB)", path, info.Size())
+		return nil
+	})
+
+	for topic, recs := range map[string][]string{
+		"topicA": []string{
+			"01BB6RV5R00000000000000000 D 2017-03-14T17:01:32.928453488+01:00\n",
+			"01BB6RWTY60000000000000000 G 2017-03-14T17:02:27.398068977+01:00\n",
+		},
+		"topicB": []string{
+			"01BB6RVR490000000000000000 E 2017-03-14T17:01:51.753613999+01:00\n",
+		},
+		"topicC": []string{
+			"01BB6RT5GS0000000000000000 C 2017-03-14T17:00:59.929816245+01:00\n",
+			"01BB6RW6C60000000000000000 F 2017-03-14T17:02:06.342946304+01:00\n",
+		},
+	} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", fmt.Sprintf(
+			"%s?from=%s&to=%s&topic=%s",
+			APIPathInternalQuery,
+			"01BB6RT5GR0000000000000000", // Just a bit before C
+			"01BB6RWTY70000000000000000", // Just a bit after G
+			topic,
+		), nil)
+		api.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Errorf("Query failed: HTTP %d: %s", w.Code, strings.TrimSpace(w.Body.String()))
+		}
+		if want, have := strings.Join(recs, ""), w.Body.String(); want != have {
+			t.Errorf("Results: want:\n%s\nhave:\n%s", want, have)
+		}
+	}
+}
+
+func newFixtureAPI(filsys fs.Filesystem, stageLog Log, topicLogs TopicLogs) *API {
+	// Build an API around that file log.
+	var (
+		baseLogger         = log.NewLogfmtLogger(os.Stderr)
+		apiReporter        = LogReporter{log.With(baseLogger, "component", "API")}
+		peer               = mockClusterPeer{}
+		queryClient        = mockDoer{}
+		streamClient       = mockDoer{}
+		replicatedSegments = prometheus.NewCounter(prometheus.CounterOpts{})
+		replicatedBytes    = prometheus.NewCounter(prometheus.CounterOpts{})
+		duration           = prometheus.NewHistogramVec(prometheus.HistogramOpts{}, []string{"method", "path", "status_code"})
+	)
+	return NewAPI(peer, stageLog, topicLogs, queryClient, streamClient, replicatedSegments, replicatedBytes, duration, apiReporter)
 }
 
 type mockClusterPeer struct{}

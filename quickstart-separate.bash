@@ -6,6 +6,7 @@ for i in `seq 1 3`
 do
   sleep 0.25
   oklog ingest \
+    -topic-mode     dynamic \
     -api            tcp://0.0.0.0:100${i}0 \
     -ingest.fast    tcp://0.0.0.0:100${i}1 \
     -ingest.durable tcp://0.0.0.0:100${i}2 \

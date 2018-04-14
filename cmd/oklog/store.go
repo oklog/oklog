@@ -203,9 +203,20 @@ func runStore(args []string) error {
 	default:
 		return errors.Errorf("invalid -filesystem %q", *filesystem)
 	}
-	storeLog, err := store.NewFileLog(
+	{
+		r, err := lockDir(fsys, *storePath)
+		if err != nil {
+			return err
+		}
+		defer r.Release()
+	}
+
+	stagingPath := filepath.Join(*storePath, "staging")
+	topicPath := filepath.Join(*storePath, "topic")
+
+	stagingLog, err := store.NewFileLog(
 		fsys,
-		*storePath,
+		stagingPath,
 		*segmentTargetSize, *segmentBufferSize,
 		store.LogReporter{Logger: log.With(logger, "component", "FileLog")},
 	)
@@ -213,11 +224,12 @@ func runStore(args []string) error {
 		return err
 	}
 	defer func() {
-		if err := storeLog.Close(); err != nil {
+		if err := stagingLog.Close(); err != nil {
 			level.Error(logger).Log("err", err)
 		}
 	}()
-	level.Info(logger).Log("StoreLog", *storePath)
+	level.Info(logger).Log("StagingLog", stagingPath)
+	level.Info(logger).Log("TopicLog", topicPath)
 
 	// Create peer.
 	peer, err := cluster.NewPeer(
@@ -284,30 +296,70 @@ func runStore(args []string) error {
 			c.Stop()
 		})
 	}
-	{
-		c := store.NewCompacter(
-			storeLog,
+
+	newTopicLogs := func() (store.TopicLogs, error) {
+		return store.NewFileTopicLogs(
+			fsys,
+			topicPath,
 			*segmentTargetSize,
-			*segmentRetain,
-			*segmentPurge,
-			compactDuration,
-			trashedSegments,
-			purgedSegments,
-			store.LogReporter{Logger: log.With(logger, "component", "Compacter")},
+			*segmentBufferSize,
+			store.LogReporter{Logger: log.With(logger, "component", "TopicLogs")},
 		)
+	}
+	{
+		topicLogs, err := newTopicLogs()
+		if err != nil {
+			return err
+		}
+		// TODO(fabxc): track delay between staging and demux completion in a metric.
+		reporter := store.LogReporter{Logger: log.With(logger, "component", "Demuxer")}
+		demux := store.NewDemuxer(stagingLog, topicLogs, reporter)
+
 		g.Add(func() error {
-			c.Run()
+			demux.Run(1 * time.Second)
 			return nil
 		}, func(error) {
-			c.Stop()
+			demux.Stop()
 		})
 	}
 	{
+		cfac := func(t string, l store.Log) *store.Compacter {
+			return store.NewCompacter(
+				l,
+				*segmentTargetSize,
+				*segmentRetain,
+				*segmentPurge,
+				compactDuration,
+				trashedSegments,
+				purgedSegments,
+				store.LogReporter{Logger: log.With(logger, "component", "Compacter", "topic", t)},
+			)
+		}
+		topicLogs, err := newTopicLogs()
+		if err != nil {
+			return err
+		}
+		reporter := store.LogReporter{Logger: log.With(logger, "component", "TopicCompacter")}
+		compacters := store.NewTopicCompacters(topicLogs, cfac, reporter)
+
+		g.Add(func() error {
+			compacters.Run()
+			return nil
+		}, func(error) {
+			compacters.Stop()
+		})
+	}
+	{
+		topicLogs, err := newTopicLogs()
+		if err != nil {
+			return err
+		}
 		g.Add(func() error {
 			mux := http.NewServeMux()
 			api := store.NewAPI(
 				peer,
-				storeLog,
+				stagingLog,
+				topicLogs,
 				timeoutClient,
 				unlimitedClient,
 				replicatedSegments.WithLabelValues("ingress"),

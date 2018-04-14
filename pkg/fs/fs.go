@@ -3,6 +3,7 @@ package fs
 
 import (
 	"io"
+	"os"
 	"path/filepath"
 	"time"
 )
@@ -14,6 +15,8 @@ type Filesystem interface {
 	Remove(path string) error
 	Rename(oldname, newname string) error
 	Exists(path string) bool
+	ReadDir(dirname string) ([]os.FileInfo, error)
+
 	MkdirAll(path string) error
 	Chtimes(path string, atime, mtime time.Time) error
 	Walk(root string, walkFn filepath.WalkFunc) error

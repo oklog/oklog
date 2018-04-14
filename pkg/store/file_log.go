@@ -26,8 +26,6 @@ const (
 	extTrashed = ".trashed"
 
 	ulidTimeSize = 10 // bytes
-
-	lockFile = "LOCK"
 )
 
 var (
@@ -40,7 +38,6 @@ var (
 type fileLog struct {
 	root              string
 	filesys           fs.Filesystem
-	releaser          fs.Releaser // for the LOCK
 	segmentTargetSize int64
 	segmentBufferSize int64
 	reporter          EventReporter
@@ -55,23 +52,12 @@ func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBu
 	if err := filesys.MkdirAll(root); err != nil {
 		return nil, errors.Wrapf(err, "creating path %s", root)
 	}
-	lock := filepath.Join(root, lockFile)
-	r, existed, err := filesys.Lock(lock)
-	if err != nil {
-		return nil, errors.Wrapf(err, "locking %s", lock)
-	}
-	if existed {
-		// The previous owner crashed, but we still got the lock.
-		// So this is like Prometheus "crash recovery" mode.
-		// But we don't have anything special we need to do.
-	}
 	if err := recoverSegments(filesys, root); err != nil {
 		return nil, errors.Wrap(err, "during recovery")
 	}
 	return &fileLog{
 		root:              root,
 		filesys:           filesys,
-		releaser:          r,
 		segmentTargetSize: segmentTargetSize,
 		segmentBufferSize: segmentBufferSize,
 		reporter:          reporter,
@@ -79,12 +65,7 @@ func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBu
 }
 
 func (fl *fileLog) Create() (WriteSegment, error) {
-	filename := filepath.Join(fl.root, fmt.Sprintf("%s%s", uuid.New(), extActive))
-	f, err := fl.filesys.Create(filename)
-	if err != nil {
-		return nil, err
-	}
-	return &fileWriteSegment{fl.filesys, f}, nil
+	return newFileWriteSegment(fl.filesys, fl.root)
 }
 
 func (fl *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
@@ -122,6 +103,33 @@ func (fl *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 
 		Records: rc,
 	}, nil
+}
+
+func (fl *fileLog) Oldest() (ReadSegment, error) {
+	var (
+		oldest = time.Now()
+		chosen string
+	)
+	fl.filesys.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil // recurse
+		}
+		if filepath.Ext(path) != extFlushed {
+			return nil // skip
+		}
+		if t := info.ModTime(); t.Before(oldest) {
+			chosen, oldest = path, t
+		}
+		return nil
+	})
+	if chosen == "" {
+		return nil, ErrNoSegmentsAvailable
+	}
+	s, err := newFileReadSegment(fl.filesys, chosen)
+	return s, err
 }
 
 func (fl *fileLog) Overlapping() ([]ReadSegment, error) {
@@ -374,7 +382,82 @@ func (fl *fileLog) Stats() (LogStats, error) {
 }
 
 func (fl *fileLog) Close() error {
-	return fl.releaser.Release()
+	return nil
+}
+
+func topicPath(root, topic string) string {
+	return filepath.Join(root, topic)
+}
+
+type fileTopicLogs struct {
+	fsys              fs.Filesystem
+	root              string
+	segmentTargetSize int64
+	segmentBufferSize int64
+	reporter          EventReporter
+	logs              map[string]Log
+}
+
+// NewFileTopicLogs returns TopicLogs backed by a filesystem.
+func NewFileTopicLogs(
+	fsys fs.Filesystem,
+	root string,
+	segmentTargetSize int64,
+	segmentBufferSize int64,
+	reporter EventReporter,
+) (TopicLogs, error) {
+	if err := fsys.MkdirAll(root); err != nil {
+		return nil, err
+	}
+	return &fileTopicLogs{
+		fsys:              fsys,
+		root:              root,
+		segmentTargetSize: segmentTargetSize,
+		segmentBufferSize: segmentBufferSize,
+		reporter:          reporter,
+	}, nil
+}
+
+func (ft *fileTopicLogs) Create(t string) (WriteSegment, error) {
+	p := topicPath(ft.root, t)
+	if !ft.fsys.Exists(p) {
+		if err := ft.fsys.MkdirAll(p); err != nil {
+			return nil, err
+		}
+	}
+	return newFileWriteSegment(ft.fsys, p)
+}
+
+func (ft *fileTopicLogs) Get(t string) (Log, error) {
+	p := topicPath(ft.root, t)
+	if !ft.fsys.Exists(p) {
+		return nil, ErrTopicNotFound
+	}
+	return NewFileLog(ft.fsys, p, ft.segmentTargetSize, ft.segmentBufferSize, ft.reporter)
+}
+
+func (ft *fileTopicLogs) All() (map[string]Log, error) {
+	fis, err := ft.fsys.ReadDir(ft.root)
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]Log{}
+	for _, fi := range fis {
+		if !fi.IsDir() {
+			continue
+		}
+		t := fi.Name()
+		l, err := NewFileLog(ft.fsys, topicPath(ft.root, t), ft.segmentTargetSize, ft.segmentBufferSize, ft.reporter)
+		if err != nil {
+			return nil, err
+		}
+		m[t] = l
+	}
+	return m, nil
+}
+
+func (ft *fileTopicLogs) Close() error {
+	return nil
 }
 
 func recoverSegments(filesys fs.Filesystem, root string) error {
@@ -532,6 +615,15 @@ func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []readSeg
 type fileWriteSegment struct {
 	fs fs.Filesystem
 	f  fs.File
+}
+
+func newFileWriteSegment(fsys fs.Filesystem, path string) (WriteSegment, error) {
+	filename := filepath.Join(path, fmt.Sprintf("%s%s", uuid.New(), extActive))
+	f, err := fsys.Create(filename)
+	if err != nil {
+		return nil, err
+	}
+	return &fileWriteSegment{fsys, f}, nil
 }
 
 func (w fileWriteSegment) Write(p []byte) (int, error) {

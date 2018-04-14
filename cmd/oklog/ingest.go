@@ -253,6 +253,13 @@ func runIngest(args []string) error {
 	default:
 		return errors.Errorf("invalid -filesystem %q", *filesystem)
 	}
+	{
+		r, err := lockDir(fsys, *ingestPath)
+		if err != nil {
+			return err
+		}
+		defer r.Release()
+	}
 
 	ingestLog, err := ingest.NewFileLog(fsys, *ingestPath)
 	if err != nil {

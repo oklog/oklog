@@ -13,6 +13,9 @@ type Log interface {
 	// Create a new segment for writes.
 	Create() (WriteSegment, error)
 
+	// Get the oldest segment.
+	Oldest() (ReadSegment, error)
+
 	// Query written and closed segments.
 	Query(qp QueryParams, statsOnly bool) (QueryResult, error)
 
@@ -75,4 +78,21 @@ type LogStats struct {
 	ReadingBytes    int64
 	TrashedSegments int64
 	TrashedBytes    int64
+}
+
+var ErrTopicNotFound = errors.New("topic not found")
+
+// TopicLogs manages Logs for multiple topics.
+type TopicLogs interface {
+	// Create a new WriteSegment for a topic.
+	Create(t string) (WriteSegment, error)
+
+	// Return the Log for the topic. Returns ErrTopicNotFound if the topic
+	// has not been created yet.
+	Get(string) (Log, error)
+
+	// All returns a map of all topics and their logs.
+	All() (map[string]Log, error)
+
+	Close() error
 }

@@ -17,11 +17,12 @@ type Compacter struct {
 	segmentTargetSize int64
 	retain            time.Duration
 	purge             time.Duration
-	stop              chan chan struct{}
 	compactDuration   *prometheus.HistogramVec
 	trashSegments     *prometheus.CounterVec
 	purgeSegments     *prometheus.CounterVec
 	reporter          EventReporter
+
+	ops []func()
 }
 
 // NewCompacter creates a Compacter.
@@ -32,54 +33,29 @@ func NewCompacter(
 	compactDuration *prometheus.HistogramVec, trashSegments, purgeSegments *prometheus.CounterVec,
 	reporter EventReporter,
 ) *Compacter {
-	return &Compacter{
+	c := &Compacter{
 		log:               log,
 		segmentTargetSize: segmentTargetSize,
 		retain:            retain,
 		purge:             purge,
-		stop:              make(chan chan struct{}),
 		trashSegments:     trashSegments,
 		purgeSegments:     purgeSegments,
 		compactDuration:   compactDuration,
 		reporter:          reporter,
 	}
-}
-
-// Run performs compactions and cleanups.
-// Run returns when Stop is invoked.
-func (c *Compacter) Run() {
-	ops := []func(){
+	c.ops = []func(){
 		func() { c.compact("Overlapping", c.log.Overlapping) },
 		func() { c.compact("Sequential", c.log.Sequential) },
 		func() { c.moveToTrash() },
 		func() { c.emptyTrash() },
 	}
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			ops[0]()                      // execute
-			ops = append(ops[1:], ops[0]) // shift
-
-		case q := <-c.stop:
-			close(q)
-			return
-		}
-	}
+	return c
 }
 
-// Stop the compacter from compacting.
-func (c *Compacter) Stop() {
-	defer func(begin time.Time) {
-		c.reporter.ReportEvent(Event{
-			Debug: true, Op: "Stop",
-			Msg: fmt.Sprintf("shutdown took %s", time.Since(begin)),
-		})
-	}(time.Now())
-	q := make(chan struct{})
-	c.stop <- q
-	<-q
+// Next runs the next compacter stage.
+func (c *Compacter) Next() {
+	c.ops[0]()
+	c.ops = append(c.ops[1:], c.ops[0])
 }
 
 func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, error)) (compacted int, result string) {
@@ -196,5 +172,71 @@ func (c *Compacter) emptyTrash() {
 				Msg: "Purging a read segment failed",
 			})
 		}
+	}
+}
+
+// CompacterFactory returns a new Compacter for a Log.
+type CompacterFactory func(string, Log) *Compacter
+
+// TopicCompacters runs compacters for a set of topic logs.
+type TopicCompacters struct {
+	topics   TopicLogs
+	cfac     CompacterFactory
+	comps    map[string]*Compacter
+	stopc    chan chan struct{}
+	reporter LogReporter
+}
+
+// NewTopicCompacters returns a new TopicCompacter that creates new compacters with a factory.
+func NewTopicCompacters(topics TopicLogs, cfac CompacterFactory, reporter LogReporter) *TopicCompacters {
+	return &TopicCompacters{
+		topics:   topics,
+		cfac:     cfac,
+		comps:    map[string]*Compacter{},
+		stopc:    make(chan chan struct{}),
+		reporter: reporter,
+	}
+}
+
+// Run starts running compaction steps for all topics.
+func (tc *TopicCompacters) Run() {
+	for {
+		select {
+		case donec := <-tc.stopc:
+			close(donec)
+			return
+		default:
+			tc.next()
+		}
+	}
+}
+
+// Stop terminates the topic compacter. It blocks until currently processing
+// compactions are completed.
+func (tc *TopicCompacters) Stop() {
+	donec := make(chan struct{})
+	tc.stopc <- donec
+	<-donec
+}
+
+// next instantiates new compacters for new topics and runs the next compacter
+// step for all of them.
+func (tc *TopicCompacters) next() {
+	all, err := tc.topics.All()
+	if err != nil {
+		tc.reporter.ReportEvent(Event{
+			Op: "getTopics", Error: err,
+			Msg: "get all topics",
+		})
+		return
+	}
+	// Ensure we have a compacter for all topics and run the next stage for each.
+	for t, l := range all {
+		if _, ok := tc.comps[t]; !ok {
+			tc.comps[t] = tc.cfac(t, l)
+		}
+	}
+	for _, c := range tc.comps {
+		c.Next()
 	}
 }

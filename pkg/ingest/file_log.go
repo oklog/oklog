@@ -16,8 +16,6 @@ const (
 	extActive  = ".active"
 	extFlushed = ".flushed"
 	extPending = ".pending"
-
-	lockFile = "LOCK"
 )
 
 // NewFileLog returns a Log implemented via the filesystem.
@@ -26,30 +24,18 @@ func NewFileLog(filesys fs.Filesystem, root string) (Log, error) {
 	if err := filesys.MkdirAll(root); err != nil {
 		return nil, errors.Wrapf(err, "creating path %s", root)
 	}
-	lock := filepath.Join(root, lockFile)
-	r, existed, err := filesys.Lock(lock)
-	if err != nil {
-		return nil, errors.Wrapf(err, "locking %s", lock)
-	}
-	if existed {
-		// The previous owner crashed, but we still got the lock.
-		// So this is like Prometheus "crash recovery" mode.
-		// But we don't have anything special we need to do.
-	}
 	if err := recoverSegments(filesys, root); err != nil {
 		return nil, errors.Wrap(err, "during recovery")
 	}
 	return &fileLog{
-		root:     root,
-		filesys:  filesys,
-		releaser: r,
+		root:    root,
+		filesys: filesys,
 	}, nil
 }
 
 type fileLog struct {
-	root     string
-	filesys  fs.Filesystem
-	releaser fs.Releaser
+	root    string
+	filesys fs.Filesystem
 }
 
 // Create returns a new writable segment.
@@ -133,7 +119,7 @@ func (log *fileLog) Stats() (LogStats, error) {
 }
 
 func (log *fileLog) Close() error {
-	return log.releaser.Release()
+	return nil
 }
 
 func recoverSegments(filesys fs.Filesystem, root string) error {

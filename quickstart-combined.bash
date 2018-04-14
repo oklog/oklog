@@ -7,6 +7,7 @@ do
   sleep 0.25
   oklog ingeststore \
     -api                       tcp://0.0.0.0:100${i}0 \
+    -ingest.topic-mode         dynamic \
     -ingest.fast               tcp://0.0.0.0:100${i}1 \
     -ingest.durable            tcp://0.0.0.0:100${i}2 \
     -ingest.bulk               tcp://0.0.0.0:100${i}3 \
