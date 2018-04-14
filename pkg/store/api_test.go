@@ -70,14 +70,19 @@ func TestAPIReplicateAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer stageLog.Close()
+
+	topicLogs, err := NewFileTopicLogs(filesys, "/topics", 10240, 1024, logReporter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer topicLogs.Close()
+
 	var (
-		topicLogs = NewFileTopicLogs(filesys, "/topics", 10240, 1024, logReporter)
-		demux     = NewDemuxer(stageLog, topicLogs, demuxReporter)
-		api       = newFixtureAPI(filesys, stageLog, topicLogs)
+		demux = NewDemuxer(stageLog, topicLogs, demuxReporter)
+		api   = newFixtureAPI(filesys, stageLog, topicLogs)
 	)
 	defer api.Close()
-	defer stageLog.Close()
-	defer topicLogs.Close()
 
 	var (
 		recordA  = "01BB6RQR190000000000000000 topicA A 2017-03-14T16:59:40.585457189+01:00\n"

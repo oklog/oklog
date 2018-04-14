@@ -211,15 +211,12 @@ func runStore(args []string) error {
 		defer r.Release()
 	}
 
-	stagingDir := filepath.Join(*storePath, "staging")
-	topicDir := filepath.Join(*storePath, "topic")
+	stagingPath := filepath.Join(*storePath, "staging")
+	topicPath := filepath.Join(*storePath, "topic")
 
-	if err := fsys.MkdirAll(topicDir); err != nil {
-		return err
-	}
 	stagingLog, err := store.NewFileLog(
 		fsys,
-		stagingDir,
+		stagingPath,
 		*segmentTargetSize, *segmentBufferSize,
 		store.LogReporter{Logger: log.With(logger, "component", "FileLog")},
 	)
@@ -231,7 +228,8 @@ func runStore(args []string) error {
 			level.Error(logger).Log("err", err)
 		}
 	}()
-	level.Info(logger).Log("StagingLog", stagingDir)
+	level.Info(logger).Log("StagingLog", stagingPath)
+	level.Info(logger).Log("TopicLog", topicPath)
 
 	// Create peer.
 	peer, err := cluster.NewPeer(
@@ -299,19 +297,23 @@ func runStore(args []string) error {
 		})
 	}
 
-	topicLogs := func() store.TopicLogs {
+	newTopicLogs := func() (store.TopicLogs, error) {
 		return store.NewFileTopicLogs(
 			fsys,
-			topicDir,
+			topicPath,
 			*segmentTargetSize,
 			*segmentBufferSize,
 			store.LogReporter{Logger: log.With(logger, "component", "TopicLogs")},
 		)
 	}
 	{
+		topicLogs, err := newTopicLogs()
+		if err != nil {
+			return err
+		}
 		// TODO(fabxc): track delay between staging and demux completion in a metric.
 		reporter := store.LogReporter{Logger: log.With(logger, "component", "Demuxer")}
-		demux := store.NewDemuxer(stagingLog, topicLogs(), reporter)
+		demux := store.NewDemuxer(stagingLog, topicLogs, reporter)
 
 		g.Add(func() error {
 			demux.Run(1 * time.Second)
@@ -321,9 +323,6 @@ func runStore(args []string) error {
 		})
 	}
 	{
-		stopc := make(chan struct{})
-		tickr := time.NewTicker(time.Second)
-
 		cfac := func(t string, l store.Log) *store.Compacter {
 			return store.NewCompacter(
 				l,
@@ -336,29 +335,31 @@ func runStore(args []string) error {
 				store.LogReporter{Logger: log.With(logger, "component", "Compacter", "topic", t)},
 			)
 		}
-		compacters := store.NewTopicCompacters(topicLogs(), cfac)
+		topicLogs, err := newTopicLogs()
+		if err != nil {
+			return err
+		}
+		reporter := store.LogReporter{Logger: log.With(logger, "component", "TopicCompacter")}
+		compacters := store.NewTopicCompacters(topicLogs, cfac, reporter)
 
 		g.Add(func() error {
-			for {
-				select {
-				case <-tickr.C:
-					compacters.Next()
-				case <-stopc:
-					return nil
-				}
-			}
+			compacters.Run()
+			return nil
 		}, func(error) {
-			close(stopc)
-			tickr.Stop()
+			compacters.Stop()
 		})
 	}
 	{
+		topicLogs, err := newTopicLogs()
+		if err != nil {
+			return err
+		}
 		g.Add(func() error {
 			mux := http.NewServeMux()
 			api := store.NewAPI(
 				peer,
 				stagingLog,
-				topicLogs(),
+				topicLogs,
 				timeoutClient,
 				unlimitedClient,
 				replicatedSegments.WithLabelValues("ingress"),

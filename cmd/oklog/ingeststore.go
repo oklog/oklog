@@ -322,17 +322,13 @@ func runIngestStore(args []string) error {
 	}()
 	level.Info(logger).Log("ingest_path", *ingestPath)
 
-	stagingDir := filepath.Join(*storePath, "staging")
-	topicDir := filepath.Join(*storePath, "topic")
-
-	if err := fsys.MkdirAll(topicDir); err != nil {
-		return err
-	}
+	stagingPath := filepath.Join(*storePath, "staging")
+	topicPath := filepath.Join(*storePath, "topic")
 
 	// Create staging log.
 	stagingLog, err := store.NewFileLog(
 		fsys,
-		stagingDir,
+		stagingPath,
 		*segmentTargetSize, *segmentBufferSize,
 		store.LogReporter{Logger: log.With(logger, "component", "FileLog")},
 	)
@@ -471,19 +467,23 @@ func runIngestStore(args []string) error {
 		})
 	}
 
-	topicLogs := func() store.TopicLogs {
+	newTopicLogs := func() (store.TopicLogs, error) {
 		return store.NewFileTopicLogs(
 			fsys,
-			topicDir,
+			topicPath,
 			*segmentTargetSize,
 			*segmentBufferSize,
 			store.LogReporter{Logger: log.With(logger, "component", "TopicLogs")},
 		)
 	}
 	{
+		topicLogs, err := newTopicLogs()
+		if err != nil {
+			return err
+		}
 		// TODO(fabxc): track delay between staging and demux completion in a metric.
 		reporter := store.LogReporter{Logger: log.With(logger, "component", "Demuxer")}
-		demux := store.NewDemuxer(stagingLog, topicLogs(), reporter)
+		demux := store.NewDemuxer(stagingLog, topicLogs, reporter)
 
 		g.Add(func() error {
 			demux.Run(1 * time.Second)
@@ -493,10 +493,6 @@ func runIngestStore(args []string) error {
 		})
 	}
 	{
-
-		stopc := make(chan struct{})
-		tickr := time.NewTicker(time.Second)
-
 		cfac := func(t string, l store.Log) *store.Compacter {
 			return store.NewCompacter(
 				l,
@@ -509,23 +505,25 @@ func runIngestStore(args []string) error {
 				store.LogReporter{Logger: log.With(logger, "component", "Compacter", "topic", t)},
 			)
 		}
-		compacters := store.NewTopicCompacters(topicLogs(), cfac)
+		topicLogs, err := newTopicLogs()
+		if err != nil {
+			return err
+		}
+		reporter := store.LogReporter{Logger: log.With(logger, "component", "TopicCompacter")}
+		compacters := store.NewTopicCompacters(topicLogs, cfac, reporter)
 
 		g.Add(func() error {
-			for {
-				select {
-				case <-tickr.C:
-					compacters.Next()
-				case <-stopc:
-					return nil
-				}
-			}
+			compacters.Run()
+			return nil
 		}, func(error) {
-			close(stopc)
-			tickr.Stop()
+			compacters.Stop()
 		})
 	}
 	{
+		topicLogs, err := newTopicLogs()
+		if err != nil {
+			return err
+		}
 		g.Add(func() error {
 			mux := http.NewServeMux()
 			mux.Handle("/ingest/", http.StripPrefix("/ingest", ingest.NewAPI(
@@ -540,7 +538,7 @@ func runIngestStore(args []string) error {
 			api := store.NewAPI(
 				peer,
 				stagingLog,
-				topicLogs(),
+				topicLogs,
 				timeoutClient,
 				unlimitedClient,
 				replicatedSegments.WithLabelValues("ingress"),

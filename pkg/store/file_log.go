@@ -405,14 +405,17 @@ func NewFileTopicLogs(
 	segmentTargetSize int64,
 	segmentBufferSize int64,
 	reporter EventReporter,
-) TopicLogs {
+) (TopicLogs, error) {
+	if err := fsys.MkdirAll(root); err != nil {
+		return nil, err
+	}
 	return &fileTopicLogs{
 		fsys:              fsys,
 		root:              root,
 		segmentTargetSize: segmentTargetSize,
 		segmentBufferSize: segmentBufferSize,
 		reporter:          reporter,
-	}
+	}, nil
 }
 
 func (ft *fileTopicLogs) Create(t string) (WriteSegment, error) {

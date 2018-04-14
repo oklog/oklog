@@ -180,26 +180,55 @@ type CompacterFactory func(string, Log) *Compacter
 
 // TopicCompacters runs compacters for a set of topic logs.
 type TopicCompacters struct {
-	topics TopicLogs
-	cfac   CompacterFactory
-	comps  map[string]*Compacter
+	topics   TopicLogs
+	cfac     CompacterFactory
+	comps    map[string]*Compacter
+	stopc    chan chan struct{}
+	reporter LogReporter
 }
 
 // NewTopicCompacters returns a new TopicCompacter that creates new compacters with a factory.
-func NewTopicCompacters(topics TopicLogs, cfac CompacterFactory) *TopicCompacters {
+func NewTopicCompacters(topics TopicLogs, cfac CompacterFactory, reporter LogReporter) *TopicCompacters {
 	return &TopicCompacters{
-		topics: topics,
-		cfac:   cfac,
-		comps:  map[string]*Compacter{},
+		topics:   topics,
+		cfac:     cfac,
+		comps:    map[string]*Compacter{},
+		stopc:    make(chan chan struct{}),
+		reporter: reporter,
 	}
 }
 
-// Next instantiates new compacters for new topics and runs the next compacter
+// Run starts running compaction steps for all topics.
+func (tc *TopicCompacters) Run() {
+	for {
+		select {
+		case donec := <-tc.stopc:
+			close(donec)
+			return
+		default:
+			tc.next()
+		}
+	}
+}
+
+// Stop terminates the topic compacter. It blocks until currently processing
+// compactions are completed.
+func (tc *TopicCompacters) Stop() {
+	donec := make(chan struct{})
+	tc.stopc <- donec
+	<-donec
+}
+
+// next instantiates new compacters for new topics and runs the next compacter
 // step for all of them.
-func (tc *TopicCompacters) Next() error {
+func (tc *TopicCompacters) next() {
 	all, err := tc.topics.All()
 	if err != nil {
-		return err
+		tc.reporter.ReportEvent(Event{
+			Op: "getTopics", Error: err,
+			Msg: "get all topics",
+		})
+		return
 	}
 	// Ensure we have a compacter for all topics and run the next stage for each.
 	for t, l := range all {
@@ -210,5 +239,4 @@ func (tc *TopicCompacters) Next() error {
 	for _, c := range tc.comps {
 		c.Next()
 	}
-	return nil
 }

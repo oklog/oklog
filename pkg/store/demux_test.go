@@ -30,8 +30,12 @@ func BenchmarkDemux(b *testing.B) {
 			if err := fsys.MkdirAll("benchrun"); err != nil {
 				b.Fatal(err)
 			}
+			topicLogs, err := NewFileTopicLogs(fsys, "benchrun", 128*1024*1024, 1024*1024, nil)
+			if err != nil {
+				b.Fatal(err)
+			}
 			reporter := LogReporter{log.NewLogfmtLogger(os.Stderr)}
-			d := NewDemuxer(nil, NewFileTopicLogs(fsys, "benchrun", 128*1024*1024, 1024*1024, nil), reporter)
+			d := NewDemuxer(nil, topicLogs, reporter)
 			rec := ""
 			for i := 0; i < 256; i++ {
 				rec += "A"
