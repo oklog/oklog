@@ -2,6 +2,7 @@ package fs
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -83,6 +84,10 @@ func (fs *virtualFilesystem) Exists(path string) bool {
 		}
 	}
 	return false
+}
+
+func (fs *virtualFilesystem) Link(oldname, newname string) error {
+	return errors.New("not implemented")
 }
 
 func (fs *virtualFilesystem) ReadDir(dirname string) ([]os.FileInfo, error) {

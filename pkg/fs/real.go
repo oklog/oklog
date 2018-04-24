@@ -55,6 +55,10 @@ func (realFilesystem) Exists(path string) bool {
 	return !os.IsNotExist(err)
 }
 
+func (realFilesystem) Link(oldname, newname string) error {
+	return os.Link(oldname, newname)
+}
+
 func (realFilesystem) ReadDir(dirname string) ([]os.FileInfo, error) {
 	return ioutil.ReadDir(dirname)
 }
