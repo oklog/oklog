@@ -40,6 +40,8 @@ const (
 
 	// PeerTypeIngestStore serves both ingest and store APIs.
 	PeerTypeIngestStore = "ingeststore"
+
+	PeerTypeIndex = "index"
 )
 
 // NewPeer creates or joins a cluster with the existing peers.

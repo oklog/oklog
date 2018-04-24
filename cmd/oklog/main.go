@@ -32,6 +32,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  ingest       Ingester node\n")
 	fmt.Fprintf(os.Stderr, "  store        Storage node\n")
 	fmt.Fprintf(os.Stderr, "  ingeststore  Combination ingest+store node, for small installations\n")
+	fmt.Fprintf(os.Stderr, "  index        Index node\n")
 	fmt.Fprintf(os.Stderr, "  query        Querying commandline tool\n")
 	fmt.Fprintf(os.Stderr, "  stream       Streaming commandline tool\n")
 	fmt.Fprintf(os.Stderr, "  testsvc      Test service, emits log lines at a fixed rate\n")
@@ -61,6 +62,8 @@ func main() {
 		run = runQuery
 	case "stream":
 		run = runStream
+	case "index":
+		run = runIndex
 	case "testsvc":
 		run = runTestService
 	default:
