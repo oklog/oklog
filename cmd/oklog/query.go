@@ -28,6 +28,7 @@ func runQuery(args []string) error {
 		stats     = flagset.Bool("stats", false, "statistics only, no records (implies -v)")
 		nocopy    = flagset.Bool("nocopy", false, "don't read the response body")
 		withulid  = flagset.Bool("ulid", false, "include ULID prefix with each record")
+		withtime  = flagset.Bool("time", false, "include time prefix with each record")
 		verbose   = flagset.Bool("v", false, "verbose output to stderr")
 	)
 	flagset.Usage = usageFor(flagset, "oklog query [flags]")
@@ -136,6 +137,8 @@ func runQuery(args []string) error {
 		break
 	case *withulid:
 		io.Copy(os.Stdout, result.Records)
+	case *withtime:
+		io.Copy(os.Stdout, parseTime(result.Records))
 	default:
 		io.Copy(os.Stdout, strip(result.Records))
 	}
@@ -157,6 +160,29 @@ func strip(r io.Reader) io.Reader {
 		s := bufio.NewScanner(r)
 		for s.Scan() {
 			pw.Write(s.Bytes()[ulid.EncodedSize+1:])
+			pw.Write([]byte{'\n'})
+		}
+		pw.CloseWithError(s.Err())
+	}()
+	return pr
+}
+
+func parseTime(r io.Reader) io.Reader {
+	pr, pw := io.Pipe()
+	go func() {
+		s := bufio.NewScanner(r)
+		for s.Scan() {
+			id, _ := ulid.Parse(s.Text()[:ulid.EncodedSize])
+			var (
+				msec = id.Time()
+				sec  = msec / 1e3
+				rem  = msec % 1e3
+				nsec = rem * 1e6
+				t    = time.Unix(int64(sec), int64(nsec))
+			)
+
+			pw.Write([]byte(t.Format(time.RFC3339)))
+			pw.Write(s.Bytes()[ulid.EncodedSize:])
 			pw.Write([]byte{'\n'})
 		}
 		pw.CloseWithError(s.Err())
