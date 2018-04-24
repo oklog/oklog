@@ -19,6 +19,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/oklog/oklog/pkg/cluster"
+	"github.com/oklog/oklog/pkg/event"
+	"github.com/oklog/oklog/pkg/record"
 	"github.com/oklog/oklog/pkg/stream"
 )
 
@@ -54,7 +56,7 @@ type API struct {
 	replicatedSegments prometheus.Counter
 	replicatedBytes    prometheus.Counter
 	duration           *prometheus.HistogramVec
-	reporter           EventReporter
+	reporter           event.Reporter
 }
 
 // NewAPI returns a usable API.
@@ -65,7 +67,7 @@ func NewAPI(
 	queryClient, streamClient Doer,
 	replicatedSegments, replicatedBytes prometheus.Counter,
 	duration *prometheus.HistogramVec,
-	reporter EventReporter,
+	reporter event.Reporter,
 ) *API {
 	return &API{
 		peer:               peer,
@@ -141,8 +143,8 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 	begin := time.Now()
 
 	// Validate user input.
-	var qp QueryParams
-	if err := qp.DecodeFrom(r.URL, rangeRequired); err != nil {
+	var qp record.QueryParams
+	if err := qp.DecodeFrom(r.URL, record.RangeRequired); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -195,7 +197,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// We'll collect responses into a single QueryResult.
-	qr := QueryResult{Params: qp}
+	qr := record.QueryResult{Params: qp}
 
 	// We'll merge all records in a single pass.
 	var rcs []io.ReadCloser
@@ -203,7 +205,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 		// Don't leak if we need to make an early return.
 		for i, rc := range rcs {
 			if err := rc.Close(); err != nil {
-				a.reporter.ReportEvent(Event{
+				a.reporter.ReportEvent(event.Event{
 					Op: "handleUserQuery", Error: err,
 					Msg: fmt.Sprintf("Close of intermediate io.ReadCloser %d/%d failed", i+1, len(rcs)),
 				})
@@ -219,7 +221,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 	for i, response := range responses {
 		// Direct error, network problem?
 		if response.err != nil {
-			a.reporter.ReportEvent(Event{
+			a.reporter.ReportEvent(event.Event{
 				Op: "handleUserQuery", Error: response.err,
 				Msg: fmt.Sprintf("gather query response from store %d/%d: total failure", i+1, len(responses)),
 			})
@@ -237,7 +239,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 				buf = []byte("unknown")
 			}
 			response.resp.Body.Close()
-			a.reporter.ReportEvent(Event{
+			a.reporter.ReportEvent(event.Event{
 				Op: "handleUserQuery", Error: fmt.Errorf(response.resp.Status),
 				Msg: fmt.Sprintf("gather query response from store %d/%d: bad status (%s)", i+1, len(responses), strings.TrimSpace(string(buf))),
 			})
@@ -248,7 +250,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 		// 206 is returned when a store knows it missed something.
 		// For now, just emit an event, so it's possible to triage.
 		if response.resp.StatusCode == http.StatusPartialContent {
-			a.reporter.ReportEvent(Event{
+			a.reporter.ReportEvent(event.Event{
 				Op:  "handleUserQuery",
 				Msg: fmt.Sprintf("gather query response from store %d/%d: partial content", i+1, len(responses)),
 			})
@@ -257,10 +259,10 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Decode the individual result.
-		var partialResult QueryResult
+		var partialResult record.QueryResult
 		if err := partialResult.DecodeFrom(response.resp); err != nil {
 			err = errors.Wrap(err, "decoding partial result")
-			a.reporter.ReportEvent(Event{
+			a.reporter.ReportEvent(event.Event{
 				Op: "handleUserQuery", Error: err,
 				Msg: fmt.Sprintf("gather query response from store %d/%d: invalid response", i+1, len(responses)),
 			})
@@ -282,7 +284,7 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Now bind all the partial ReadClosers together.
-	mrc, err := newMergeReadCloser(rcs)
+	mrc, err := record.NewMergeReadCloser(rcs)
 	if err != nil {
 		err = errors.Wrap(err, "constructing merging reader")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -297,8 +299,8 @@ func (a *API) handleUserQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request) {
-	var qp QueryParams
-	if err := qp.DecodeFrom(r.URL, rangeRequired); err != nil {
+	var qp record.QueryParams
+	if err := qp.DecodeFrom(r.URL, record.RangeRequired); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -328,8 +330,8 @@ func (a *API) handleInternalQuery(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 	// Validate user input.
-	var qp QueryParams
-	if err := qp.DecodeFrom(r.URL, rangeNotRequired); err != nil {
+	var qp record.QueryParams
+	if err := qp.DecodeFrom(r.URL, record.RangeNotRequired); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -395,8 +397,8 @@ func (a *API) handleUserStream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleInternalStream(w http.ResponseWriter, r *http.Request) {
-	var qp QueryParams
-	if err := qp.DecodeFrom(r.URL, rangeNotRequired); err != nil {
+	var qp record.QueryParams
+	if err := qp.DecodeFrom(r.URL, record.RangeNotRequired); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -407,10 +409,10 @@ func (a *API) handleInternalStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pass := recordFilterPlain([]byte(qp.Q))
+	pass := record.FilterPlain([]byte(qp.Q))
 	if qp.Regex {
 		// QueryParams.DecodeFrom validated the regex.
-		pass = recordFilterRegex(regexp.MustCompile(qp.Q))
+		pass = record.FilterRegex(regexp.MustCompile(qp.Q))
 	}
 
 	// The records chan is closed when the context is canceled.
@@ -489,4 +491,18 @@ func teeRecords(src io.Reader, dst ...io.Writer) (lo, hi ulid.ULID, n int, err e
 		n += n0
 	}
 	return lo, hi, n, s.Err() // EOF yields nil
+}
+
+// Like bufio.ScanLines, but retain the \n.
+func scanLinesPreserveNewline(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[0 : i+1], nil
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }

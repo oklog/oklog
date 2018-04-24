@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oklog/oklog/pkg/record"
 	"github.com/oklog/ulid"
 )
 
@@ -24,11 +25,11 @@ func TestQueryRegistry(t *testing.T) {
 
 	// Register a query for 'foo' records.
 	fooctx, foocancel := context.WithCancel(context.Background())
-	fooc := qr.Register(fooctx, recordFilterPlain([]byte("foo")))
+	fooc := qr.Register(fooctx, record.FilterPlain([]byte("foo")))
 
 	// Register a query for 'bar' records.
 	barctx, barcancel := context.WithCancel(context.Background())
-	barc := qr.Register(barctx, recordFilterPlain([]byte("bar")))
+	barc := qr.Register(barctx, record.FilterPlain([]byte("bar")))
 
 	// A helper function to generate segments.
 	nopulid := ulid.MustNew(0, nil).String()
@@ -91,7 +92,7 @@ func TestQueryRegistryClose(t *testing.T) {
 	t.Parallel()
 
 	qr := newQueryRegistry()
-	c := qr.Register(context.Background(), recordFilterPlain([]byte("")))
+	c := qr.Register(context.Background(), record.FilterPlain([]byte("")))
 	qr.Close()
 	select {
 	case _, ok := <-c:
@@ -132,7 +133,7 @@ func TestQueryRegistryRaces(t *testing.T) {
 	)
 	for i := 0; i < n; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
-		records := qr.Register(ctx, recordFilterPlain([]byte("")))
+		records := qr.Register(ctx, record.FilterPlain([]byte("")))
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

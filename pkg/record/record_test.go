@@ -45,7 +45,7 @@ func TestDynamicReader(t *testing.T) {
 
 			r := NewDynamicReader(bytes.NewBufferString(c.input))
 			for {
-				rec, err = r()
+				rec, err = r.Read()
 				if err != nil {
 					break
 				}
@@ -91,7 +91,7 @@ func TestStaticReader(t *testing.T) {
 
 			r := StaticReaderFactory([]byte("topic_A"))(bytes.NewBufferString(c.input))
 			for {
-				rec, err = r()
+				rec, err = r.Read()
 				if err != nil {
 					break
 				}

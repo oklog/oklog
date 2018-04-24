@@ -9,6 +9,7 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/oklog/ulid"
 
+	"github.com/oklog/oklog/pkg/event"
 	"github.com/oklog/oklog/pkg/fs"
 )
 
@@ -34,7 +35,7 @@ func BenchmarkDemux(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			reporter := LogReporter{log.NewLogfmtLogger(os.Stderr)}
+			reporter := event.LogReporter{log.NewLogfmtLogger(os.Stderr)}
 			d := NewDemuxer(nil, topicLogs, reporter)
 			rec := ""
 			for i := 0; i < 256; i++ {

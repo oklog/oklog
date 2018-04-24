@@ -1,4 +1,4 @@
-package store
+package event
 
 import (
 	"github.com/go-kit/kit/log"
@@ -15,17 +15,17 @@ type Event struct {
 	Msg     string
 }
 
-// EventReporter can receive (and, presumably, do something with) Events.
-type EventReporter interface {
+// Reporter can receive (and, presumably, do something with) Events.
+type Reporter interface {
 	ReportEvent(Event)
 }
 
-// LogReporter is a default implementation of EventReporter that logs events to
+// LogReporter is a default implementation of Reporter that logs events to
 // the wrapped logger. By default, events are logged at Warning level; if Err is
 // non-nil, events are logged at Error level.
 type LogReporter struct{ log.Logger }
 
-// ReportEvent implements EventReporter.
+// ReportEvent implements Reporter.
 func (r LogReporter) ReportEvent(e Event) {
 	if e.Op == "" {
 		e.Op = "undefined"
