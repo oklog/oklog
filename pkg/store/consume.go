@@ -14,7 +14,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/oklog/oklog/pkg/cluster"
+	"github.com/oklog/oklog/pkg/event"
 	"github.com/oklog/oklog/pkg/ingest"
+	"github.com/oklog/oklog/pkg/record"
 )
 
 // Consumer reads segments from the ingesters, and replicates merged segments to
@@ -37,7 +39,7 @@ type Consumer struct {
 	consumedBytes      prometheus.Counter
 	replicatedSegments prometheus.Counter
 	replicatedBytes    prometheus.Counter
-	reporter           EventReporter
+	reporter           event.Reporter
 }
 
 // NewConsumer creates a consumer.
@@ -51,7 +53,7 @@ func NewConsumer(
 	replicationFactor int,
 	consumedSegments, consumedBytes prometheus.Counter,
 	replicatedSegments, replicatedBytes prometheus.Counter,
-	reporter EventReporter,
+	reporter event.Reporter,
 ) *Consumer {
 	return &Consumer{
 		peer:               peer,
@@ -122,7 +124,7 @@ func (c *Consumer) gather() stateFn {
 	if want, have := c.replicationFactor, len(c.peer.Current(cluster.PeerTypeStore)); have < want {
 		// Don't gather if we can't replicate.
 		// Better to queue up on the ingesters.
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "gather", Warning: fmt.Errorf("replication factor %d, available peers %d: replication currently impossible", want, have),
 		})
 		time.Sleep(time.Second)
@@ -143,7 +145,7 @@ func (c *Consumer) gather() stateFn {
 	instance := instances[rand.Intn(len(instances))]
 	nextResp, err := c.client.Get(fmt.Sprintf("http://%s/ingest%s", instance, ingest.APIPathNext))
 	if err != nil {
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "gather", Warning: err,
 			Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, ingest.APIPathNext),
 		})
@@ -153,7 +155,7 @@ func (c *Consumer) gather() stateFn {
 	defer nextResp.Body.Close()
 	nextRespBody, err := ioutil.ReadAll(nextResp.Body)
 	if err != nil {
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "gather", Warning: err,
 			Msg: fmt.Sprintf("ingester %s, during %s: read error", instance, ingest.APIPathNext),
 		})
@@ -167,7 +169,7 @@ func (c *Consumer) gather() stateFn {
 		return c.gather
 	}
 	if nextResp.StatusCode != http.StatusOK {
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "gather", Warning: fmt.Errorf(nextResp.Status),
 			Msg: fmt.Sprintf("ingester %s, during %s: bad response code", instance, ingest.APIPathNext),
 		})
@@ -186,7 +188,7 @@ func (c *Consumer) gather() stateFn {
 		// Reading failed, so we can't possibly commit the segment.
 		// The simplest thing to do now is to fail everything.
 		// TODO(pb): this could be improved i.e. made more granular
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "gather", Error: err,
 			Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, ingest.APIPathRead),
 		})
@@ -195,7 +197,7 @@ func (c *Consumer) gather() stateFn {
 	}
 	defer readResp.Body.Close()
 	if readResp.StatusCode != http.StatusOK {
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "gather", Error: fmt.Errorf(readResp.Status),
 			Msg: fmt.Sprintf("ingester %s, during %s: bad response code", instance, ingest.APIPathRead),
 		})
@@ -205,8 +207,8 @@ func (c *Consumer) gather() stateFn {
 
 	// Merge the segment into our active segment.
 	var cw countingWriter
-	if _, _, _, err := mergeRecords(c.active, io.TeeReader(readResp.Body, &cw)); err != nil {
-		c.reporter.ReportEvent(Event{
+	if _, _, _, err := record.MergeRecords(c.active, io.TeeReader(readResp.Body, &cw)); err != nil {
+		c.reporter.ReportEvent(event.Event{
 			Op: "gather", Error: err,
 			Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, "mergeRecords"),
 		})
@@ -231,7 +233,7 @@ func (c *Consumer) replicate() stateFn {
 		replicated = 0
 	)
 	if want, have := c.replicationFactor, len(peers); have < want {
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "replicate", Warning: fmt.Errorf("replication factor %d, available peers %d: replication currently impossible", want, have),
 		})
 		return c.fail // can't do anything here
@@ -246,7 +248,7 @@ func (c *Consumer) replicate() stateFn {
 		)
 		resp, err := c.client.Post(uri, bodyType, body)
 		if err != nil {
-			c.reporter.ReportEvent(Event{
+			c.reporter.ReportEvent(event.Event{
 				Op: "replicate", Error: err,
 				Msg: fmt.Sprintf("target %s, during %s: fatal error", target, APIPathReplicate),
 			})
@@ -254,7 +256,7 @@ func (c *Consumer) replicate() stateFn {
 		}
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			c.reporter.ReportEvent(Event{
+			c.reporter.ReportEvent(event.Event{
 				Op: "replicate", Error: fmt.Errorf(resp.Status),
 				Msg: fmt.Sprintf("target %s, during %s: bad status code", target, APIPathReplicate),
 			})
@@ -263,7 +265,7 @@ func (c *Consumer) replicate() stateFn {
 		replicated++
 	}
 	if replicated < c.replicationFactor {
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "replicate", Error: fmt.Errorf("failed to fully replicate: want %d, have %d", c.replicationFactor, replicated),
 		})
 		return c.fail // harsh, but OK
@@ -296,7 +298,7 @@ func (c *Consumer) resetVia(commitOrFailed string) stateFn {
 				uri := fmt.Sprintf("http://%s/ingest/%s?id=%s", instance, commitOrFailed, id)
 				resp, err := c.client.Post(uri, "text/plain", nil)
 				if err != nil {
-					c.reporter.ReportEvent(Event{
+					c.reporter.ReportEvent(event.Event{
 						Op: commitOrFailed, Error: err,
 						Msg: fmt.Sprintf("instance %s, during %s: fatal error", instance, "POST"),
 					})
@@ -304,7 +306,7 @@ func (c *Consumer) resetVia(commitOrFailed string) stateFn {
 				}
 				resp.Body.Close()
 				if resp.StatusCode != http.StatusOK {
-					c.reporter.ReportEvent(Event{
+					c.reporter.ReportEvent(event.Event{
 						Op: commitOrFailed, Error: fmt.Errorf(resp.Status),
 						Msg: fmt.Sprintf("instance %s, during %s: bad status code", instance, "POST"),
 					})

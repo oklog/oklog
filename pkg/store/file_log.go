@@ -16,7 +16,9 @@ import (
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 
+	"github.com/oklog/oklog/pkg/event"
 	"github.com/oklog/oklog/pkg/fs"
+	"github.com/oklog/oklog/pkg/record"
 )
 
 const (
@@ -40,14 +42,14 @@ type fileLog struct {
 	filesys           fs.Filesystem
 	segmentTargetSize int64
 	segmentBufferSize int64
-	reporter          EventReporter
+	reporter          event.Reporter
 }
 
 // NewFileLog returns a Log backed by the filesystem at path root.
 // Note that we don't own segment files! They may disappear.
-func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64, reporter EventReporter) (Log, error) {
+func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64, reporter event.Reporter) (Log, error) {
 	if reporter == nil {
-		reporter = LogReporter{log.NewNopLogger()}
+		reporter = event.LogReporter{log.NewNopLogger()}
 	}
 	if err := filesys.MkdirAll(root); err != nil {
 		return nil, errors.Wrapf(err, "creating path %s", root)
@@ -68,14 +70,14 @@ func (fl *fileLog) Create() (WriteSegment, error) {
 	return newFileWriteSegment(fl.filesys, fl.root)
 }
 
-func (fl *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
+func (fl *fileLog) Query(qp record.QueryParams, statsOnly bool) (record.QueryResult, error) {
 	var (
 		begin    = time.Now()
 		segments = fl.queryMatchingSegments(qp.From.ULID, qp.To.ULID)
-		pass     = recordFilterBoundedPlain(qp.From.ULID, qp.To.ULID, []byte(qp.Q))
+		pass     = record.FilterBoundedPlain(qp.From.ULID, qp.To.ULID, []byte(qp.Q))
 	)
 	if qp.Regex {
-		pass = recordFilterBoundedRegex(qp.From.ULID, qp.To.ULID, regexp.MustCompile(qp.Q))
+		pass = record.FilterBoundedRegex(qp.From.ULID, qp.To.ULID, regexp.MustCompile(qp.Q))
 	}
 
 	// Time range should be inclusive, so we need a max value here.
@@ -84,15 +86,15 @@ func (fl *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 	}
 
 	// Build the lazy reader.
-	rc, sz, err := newQueryReadCloser(fl.filesys, segments, pass, fl.segmentBufferSize, fl.reporter)
+	rc, sz, err := record.NewQueryReadCloser(fl.filesys, segments, pass, fl.segmentBufferSize, fl.reporter)
 	if err != nil {
-		return QueryResult{}, errors.Wrap(err, "constructing the lazy reader")
+		return record.QueryResult{}, errors.Wrap(err, "constructing the lazy reader")
 	}
 	if statsOnly {
 		rc = ioutil.NopCloser(bytes.NewReader(nil))
 	}
 
-	return QueryResult{
+	return record.QueryResult{
 		Params: qp,
 
 		NodesQueried:    1,
@@ -147,13 +149,13 @@ func (fl *fileLog) Overlapping() ([]ReadSegment, error) {
 			return nil // skip
 		}
 		if _, _, err := parseFilename(path); err != nil {
-			fl.reporter.ReportEvent(Event{
+			fl.reporter.ReportEvent(event.Event{
 				Op: "Overlapping", File: path, Warning: err,
 				Msg: fmt.Sprintf("will remove apparently-bad data file of size %d", info.Size()),
 			})
 			// TODO(pb): re-parse and recover this file, async
 			if err := fl.filesys.Remove(path); err != nil {
-				fl.reporter.ReportEvent(Event{
+				fl.reporter.ReportEvent(event.Event{
 					Op: "Overlapping", File: path, Warning: err,
 					Msg: "tried to remove apparently-bad data file, which failed",
 				})
@@ -229,13 +231,13 @@ func (fl *fileLog) Sequential() ([]ReadSegment, error) {
 		}
 		a, _, err := parseFilename(path)
 		if err != nil {
-			fl.reporter.ReportEvent(Event{
+			fl.reporter.ReportEvent(event.Event{
 				Op: "Sequential", File: path, Warning: err,
 				Msg: fmt.Sprintf("will remove apparently-bad data file of size %d", info.Size()),
 			})
 			// TODO(pb): re-parse and recover this file, async
 			if err := fl.filesys.Remove(path); err != nil {
-				fl.reporter.ReportEvent(Event{
+				fl.reporter.ReportEvent(event.Event{
 					Op: "Sequential", File: path, Warning: err,
 					Msg: "tried to remove apparently-bad data file, which failed",
 				})
@@ -285,13 +287,13 @@ func (fl *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
 		}
 		_, high, err := parseFilename(path)
 		if err != nil {
-			fl.reporter.ReportEvent(Event{
+			fl.reporter.ReportEvent(event.Event{
 				Op: "Trashable", File: path, Warning: err,
 				Msg: fmt.Sprintf("will remove apparently-bad data file of size %d", info.Size()),
 			})
 			// TODO(pb): re-parse and recover this file, async
 			if err := fl.filesys.Remove(path); err != nil {
-				fl.reporter.ReportEvent(Event{
+				fl.reporter.ReportEvent(event.Event{
 					Op: "Trashable", File: path, Warning: err,
 					Msg: "tried to remove apparently-bad data file, which failed",
 				})
@@ -394,7 +396,7 @@ type fileTopicLogs struct {
 	root              string
 	segmentTargetSize int64
 	segmentBufferSize int64
-	reporter          EventReporter
+	reporter          event.Reporter
 	logs              map[string]Log
 }
 
@@ -404,7 +406,7 @@ func NewFileTopicLogs(
 	root string,
 	segmentTargetSize int64,
 	segmentBufferSize int64,
-	reporter EventReporter,
+	reporter event.Reporter,
 ) (TopicLogs, error) {
 	if err := fsys.MkdirAll(root); err != nil {
 		return nil, err
@@ -486,7 +488,7 @@ func recoverSegments(filesys fs.Filesystem, root string) error {
 		if err != nil {
 			return err
 		}
-		lo, hi, _, err := mergeRecords(ioutil.Discard, f)
+		lo, hi, _, err := record.MergeRecords(ioutil.Discard, f)
 		f.Close() // ignore error, for now
 		if err != nil {
 			return err
@@ -516,48 +518,10 @@ func recoverSegments(filesys fs.Filesystem, root string) error {
 	return nil
 }
 
-func recordFilterPlain(q []byte) recordFilter {
-	return func(b []byte) bool {
-		return len(b) > ulid.EncodedSize && bytes.Contains(b[ulid.EncodedSize+1:], q)
-	}
-}
-
-func recordFilterRegex(q *regexp.Regexp) recordFilter {
-	return func(b []byte) bool {
-		return len(b) > ulid.EncodedSize && q.Match(b[ulid.EncodedSize+1:])
-	}
-}
-
-func recordFilterBoundedPlain(from, to ulid.ULID, q []byte) recordFilter {
-	fromBytes, _ := from.MarshalText()
-	fromBytes = fromBytes[:ulidTimeSize]
-	toBytes, _ := to.MarshalText()
-	toBytes = toBytes[:ulidTimeSize]
-	return func(b []byte) bool {
-		return len(b) > ulid.EncodedSize &&
-			bytes.Compare(b[:ulidTimeSize], fromBytes) >= 0 &&
-			bytes.Compare(b[:ulidTimeSize], toBytes) <= 0 &&
-			bytes.Contains(b[ulid.EncodedSize+1:], q)
-	}
-}
-
-func recordFilterBoundedRegex(from, to ulid.ULID, q *regexp.Regexp) recordFilter {
-	fromBytes, _ := from.MarshalText()
-	fromBytes = fromBytes[:ulidTimeSize]
-	toBytes, _ := to.MarshalText()
-	toBytes = toBytes[:ulidTimeSize]
-	return func(b []byte) bool {
-		return len(b) > ulid.EncodedSize &&
-			bytes.Compare(b[:ulidTimeSize], fromBytes) >= 0 &&
-			bytes.Compare(b[:ulidTimeSize], toBytes) <= 0 &&
-			q.Match(b[ulid.EncodedSize+1:])
-	}
-}
-
 // queryMatchingSegments returns a sorted slice of all segment files that could
 // possibly have records in the provided time range. The caller is responsible
 // for closing the segments.
-func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []readSegment) {
+func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []record.QuerySegment) {
 	fl.filesys.Walk(fl.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -572,13 +536,13 @@ func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []readSeg
 		}
 		low, high, err := parseFilename(path)
 		if err != nil {
-			fl.reporter.ReportEvent(Event{
+			fl.reporter.ReportEvent(event.Event{
 				Op: "queryMatchingSegments", File: path, Warning: err,
 				Msg: fmt.Sprintf("will remove apparently-bad data file of size %d", info.Size()),
 			})
 			// TODO(pb): re-parse and recover this file, async
 			if err := fl.filesys.Remove(path); err != nil {
-				fl.reporter.ReportEvent(Event{
+				fl.reporter.ReportEvent(event.Event{
 					Op: "queryMatchingSegments", File: path, Warning: err,
 					Msg: "tried to remove apparently-bad data file, which failed",
 				})
@@ -588,25 +552,25 @@ func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []readSeg
 		if !overlap(from, to, low, high) {
 			return nil
 		}
-		file, err := fl.filesys.Open(path)
+		seg, err := record.NewFileReader(fl.filesys, path)
 		switch err {
 		case nil:
-			segments = append(segments, readSegment{path, file, info.Size()})
+			segments = append(segments, record.QuerySegment{Path: path, Reader: seg, Size: info.Size()})
 		case os.ErrNotExist:
-			fl.reporter.ReportEvent(Event{
+			fl.reporter.ReportEvent(event.Event{
 				Op: "queryMatchingSegments", File: path, Warning: err,
 				Msg: "this can happen due to e.g. compaction",
 			})
 		default:
-			fl.reporter.ReportEvent(Event{
+			fl.reporter.ReportEvent(event.Event{
 				Op: "queryMatchingSegments", File: path, Error: err,
 			})
 		}
 		return nil
 	})
 	sort.Slice(segments, func(i, j int) bool {
-		a := strings.SplitN(basename(segments[i].path), "-", 2)[0]
-		b := strings.SplitN(basename(segments[j].path), "-", 2)[0]
+		a := strings.SplitN(basename(segments[i].Path), "-", 2)[0]
+		b := strings.SplitN(basename(segments[j].Path), "-", 2)[0]
 		return a < b
 	})
 	return segments

@@ -17,6 +17,7 @@ import (
 	"github.com/rs/cors"
 
 	"github.com/oklog/oklog/pkg/cluster"
+	"github.com/oklog/oklog/pkg/event"
 	"github.com/oklog/oklog/pkg/fs"
 	"github.com/oklog/oklog/pkg/group"
 	"github.com/oklog/oklog/pkg/ingest"
@@ -330,7 +331,7 @@ func runIngestStore(args []string) error {
 		fsys,
 		stagingPath,
 		*segmentTargetSize, *segmentBufferSize,
-		store.LogReporter{Logger: log.With(logger, "component", "FileLog")},
+		event.LogReporter{Logger: log.With(logger, "component", "FileLog")},
 	)
 	if err != nil {
 		return err
@@ -457,7 +458,7 @@ func runIngestStore(args []string) error {
 			consumedBytes,
 			replicatedSegments.WithLabelValues("egress"),
 			replicatedBytes.WithLabelValues("egress"),
-			store.LogReporter{Logger: log.With(logger, "component", "Consumer")},
+			event.LogReporter{Logger: log.With(logger, "component", "Consumer")},
 		)
 		g.Add(func() error {
 			c.Run()
@@ -473,7 +474,7 @@ func runIngestStore(args []string) error {
 			topicPath,
 			*segmentTargetSize,
 			*segmentBufferSize,
-			store.LogReporter{Logger: log.With(logger, "component", "TopicLogs")},
+			event.LogReporter{Logger: log.With(logger, "component", "TopicLogs")},
 		)
 	}
 	{
@@ -482,7 +483,7 @@ func runIngestStore(args []string) error {
 			return err
 		}
 		// TODO(fabxc): track delay between staging and demux completion in a metric.
-		reporter := store.LogReporter{Logger: log.With(logger, "component", "Demuxer")}
+		reporter := event.LogReporter{Logger: log.With(logger, "component", "Demuxer")}
 		demux := store.NewDemuxer(stagingLog, topicLogs, reporter)
 
 		g.Add(func() error {
@@ -502,14 +503,14 @@ func runIngestStore(args []string) error {
 				compactDuration,
 				trashedSegments,
 				purgedSegments,
-				store.LogReporter{Logger: log.With(logger, "component", "Compacter", "topic", t)},
+				event.LogReporter{Logger: log.With(logger, "component", "Compacter", "topic", t)},
 			)
 		}
 		topicLogs, err := newTopicLogs()
 		if err != nil {
 			return err
 		}
-		reporter := store.LogReporter{Logger: log.With(logger, "component", "TopicCompacter")}
+		reporter := event.LogReporter{Logger: log.With(logger, "component", "TopicCompacter")}
 		compacters := store.NewTopicCompacters(topicLogs, cfac, reporter)
 
 		g.Add(func() error {
@@ -544,7 +545,7 @@ func runIngestStore(args []string) error {
 				replicatedSegments.WithLabelValues("ingress"),
 				replicatedBytes.WithLabelValues("ingress"),
 				apiDuration,
-				store.LogReporter{Logger: log.With(logger, "component", "API")},
+				event.LogReporter{Logger: log.With(logger, "component", "API")},
 			)
 			defer func() {
 				if err := api.Close(); err != nil {

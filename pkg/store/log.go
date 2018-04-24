@@ -5,6 +5,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/oklog/oklog/pkg/record"
 	"github.com/oklog/ulid"
 )
 
@@ -17,7 +18,7 @@ type Log interface {
 	Oldest() (ReadSegment, error)
 
 	// Query written and closed segments.
-	Query(qp QueryParams, statsOnly bool) (QueryResult, error)
+	Query(qp record.QueryParams, statsOnly bool) (record.QueryResult, error)
 
 	// Overlapping returns segments that have a high degree of time overlap and
 	// can be compacted.

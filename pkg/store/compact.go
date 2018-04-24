@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/oklog/oklog/pkg/event"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -20,7 +21,7 @@ type Compacter struct {
 	compactDuration   *prometheus.HistogramVec
 	trashSegments     *prometheus.CounterVec
 	purgeSegments     *prometheus.CounterVec
-	reporter          EventReporter
+	reporter          event.Reporter
 
 	ops []func()
 }
@@ -31,7 +32,7 @@ func NewCompacter(
 	log Log,
 	segmentTargetSize int64, retain time.Duration, purge time.Duration,
 	compactDuration *prometheus.HistogramVec, trashSegments, purgeSegments *prometheus.CounterVec,
-	reporter EventReporter,
+	reporter event.Reporter,
 ) *Compacter {
 	c := &Compacter{
 		log:               log,
@@ -73,7 +74,7 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 		return 0, "NoSegmentsAvailable" // no problem
 	}
 	if err != nil {
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "compact", Error: err,
 			Msg: fmt.Sprintf("compact %s failed during getSegments", kind),
 		})
@@ -84,7 +85,7 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 		for _, readSegment := range readSegments {
 			if err := readSegment.Reset(); err != nil {
 				// We can't do anything but log the error.
-				c.reporter.ReportEvent(Event{
+				c.reporter.ReportEvent(event.Event{
 					Op: "compact", Error: err,
 					Msg: fmt.Sprintf("compact %s failed to Reset a read segment", kind),
 				})
@@ -100,7 +101,7 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 		readers[i] = readSegment
 	}
 	if _, err := mergeRecordsToLog(c.log, c.segmentTargetSize, readers...); err != nil {
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "compact", Error: err,
 			Msg: fmt.Sprintf("compact %s failed during mergeRecordsToLog", kind),
 		})
@@ -114,7 +115,7 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 		// which is no big deal, and we might catch it in another pass of the
 		// compacter.
 		if err := readSegment.Purge(); err != nil {
-			c.reporter.ReportEvent(Event{
+			c.reporter.ReportEvent(event.Event{
 				Op: "compact", Warning: err,
 				Msg: fmt.Sprintf("compact %s failed to Purge a read segment, which is not critical", kind),
 			})
@@ -134,7 +135,7 @@ func (c *Compacter) moveToTrash() {
 		return // no problem
 	}
 	if err != nil {
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "moveToTrash", Error: err,
 			Msg: "fetching Trashable read segments failed",
 		})
@@ -143,7 +144,7 @@ func (c *Compacter) moveToTrash() {
 	for _, segment := range readSegments {
 		if err := segment.Trash(); err != nil {
 			// We can't do anything but log the error.
-			c.reporter.ReportEvent(Event{
+			c.reporter.ReportEvent(event.Event{
 				Op: "moveToTrash", Error: err,
 				Msg: "Trashing a read segment failed",
 			})
@@ -158,7 +159,7 @@ func (c *Compacter) emptyTrash() {
 		return // no problem
 	}
 	if err != nil {
-		c.reporter.ReportEvent(Event{
+		c.reporter.ReportEvent(event.Event{
 			Op: "emptyTrash", Error: err,
 			Msg: "fetching Purgeable segments failed",
 		})
@@ -167,7 +168,7 @@ func (c *Compacter) emptyTrash() {
 	for _, segment := range trashSegments {
 		if err := segment.Purge(); err != nil {
 			// We can't do anything but log the error.
-			c.reporter.ReportEvent(Event{
+			c.reporter.ReportEvent(event.Event{
 				Op: "emptyTrash", Error: err,
 				Msg: "Purging a read segment failed",
 			})
@@ -184,11 +185,11 @@ type TopicCompacters struct {
 	cfac     CompacterFactory
 	comps    map[string]*Compacter
 	stopc    chan chan struct{}
-	reporter LogReporter
+	reporter event.Reporter
 }
 
 // NewTopicCompacters returns a new TopicCompacter that creates new compacters with a factory.
-func NewTopicCompacters(topics TopicLogs, cfac CompacterFactory, reporter LogReporter) *TopicCompacters {
+func NewTopicCompacters(topics TopicLogs, cfac CompacterFactory, reporter event.Reporter) *TopicCompacters {
 	return &TopicCompacters{
 		topics:   topics,
 		cfac:     cfac,
@@ -224,7 +225,7 @@ func (tc *TopicCompacters) Stop() {
 func (tc *TopicCompacters) next() {
 	all, err := tc.topics.All()
 	if err != nil {
-		tc.reporter.ReportEvent(Event{
+		tc.reporter.ReportEvent(event.Event{
 			Op: "getTopics", Error: err,
 			Msg: "get all topics",
 		})

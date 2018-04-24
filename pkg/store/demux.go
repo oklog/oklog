@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/oklog/oklog/pkg/event"
 	"github.com/oklog/oklog/pkg/record"
 	"github.com/oklog/ulid"
 )
@@ -19,11 +20,11 @@ type Demuxer struct {
 	topicLogs TopicLogs
 	topics    map[string]Log
 	stopc     chan chan struct{}
-	reporter  LogReporter
+	reporter  event.Reporter
 }
 
 // NewDemuxer returns a new Demuxer with the given staging and topic paths.
-func NewDemuxer(staging Log, topicsLogs TopicLogs, reporter LogReporter) *Demuxer {
+func NewDemuxer(staging Log, topicsLogs TopicLogs, reporter event.Reporter) *Demuxer {
 	return &Demuxer{
 		staging:   staging,
 		topicLogs: topicsLogs,
@@ -53,7 +54,7 @@ func (d *Demuxer) Run(interval time.Duration) {
 			// Wait for the next tick on any error we encounter to avoid spinning
 			// in unrecovering conditions.
 			if err != ErrNoSegmentsAvailable {
-				d.reporter.ReportEvent(Event{
+				d.reporter.ReportEvent(event.Event{
 					Op: "demux", Error: err,
 					Msg: fmt.Sprintf("demux failed"),
 				})
@@ -98,7 +99,7 @@ func (d *Demuxer) demux(s ReadSegment) (err error) {
 		w         *bufio.Writer
 	}
 	m := map[string]*entry{}
-	read := record.NewReader(s)
+	r := record.NewReader(s)
 
 	defer func() {
 		if err != nil {
@@ -108,7 +109,7 @@ func (d *Demuxer) demux(s ReadSegment) (err error) {
 		}
 	}()
 	for {
-		rec, err := read()
+		rec, err := r.Read()
 		if err == io.EOF {
 			break
 		} else if err != nil {

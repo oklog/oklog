@@ -108,9 +108,9 @@ func TestHandleConnectionsCleanup(t *testing.T) {
 }
 
 func echo(t *testing.T) ConnectionHandler {
-	return func(read record.Reader, w *Writer, _ IDGenerator, _ prometheus.Gauge) error {
+	return func(r record.Reader, w *Writer, _ IDGenerator, _ prometheus.Gauge) error {
 		for {
-			r, err := read()
+			r, err := r.Read()
 			if err == io.EOF {
 				return nil
 			} else if err != nil {

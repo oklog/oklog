@@ -15,6 +15,7 @@ type Filesystem interface {
 	Remove(path string) error
 	Rename(oldname, newname string) error
 	Exists(path string) bool
+	Link(oldname, newname string) error
 	ReadDir(dirname string) ([]os.FileInfo, error)
 
 	MkdirAll(path string) error

@@ -73,7 +73,7 @@ func HandleFastWriter(r record.Reader, w *Writer, idGen IDGenerator, connectedCl
 	defer connectedClients.Dec()
 
 	for {
-		record, err := r()
+		record, err := r.Read()
 		if err == io.EOF {
 			return nil
 		}
@@ -94,7 +94,7 @@ func HandleDurableWriter(r record.Reader, w *Writer, idGen IDGenerator, connecte
 	defer connectedClients.Dec()
 
 	for {
-		record, err := r()
+		record, err := r.Read()
 		if err == io.EOF {
 			return nil
 		}

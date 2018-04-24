@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oklog/oklog/pkg/record"
 	"github.com/pkg/errors"
 )
 
@@ -20,7 +21,7 @@ type queryRegistry struct {
 type chanmap map[chan<- []byte]queryContext
 
 type queryContext struct {
-	pass   recordFilter
+	pass   record.Filter
 	done   <-chan struct{}
 	cancel func()
 }
@@ -34,7 +35,7 @@ func newQueryRegistry() *queryRegistry {
 // Register a new query. If successful, range over the returned chan for
 // incoming records. If not successful, the returned chan will be nil.
 // Records on the returned chan will NOT have trailing newlines.
-func (qr *queryRegistry) Register(ctx context.Context, pass recordFilter) <-chan []byte {
+func (qr *queryRegistry) Register(ctx context.Context, pass record.Filter) <-chan []byte {
 	qr.mtx.Lock()
 	defer qr.mtx.Unlock()
 

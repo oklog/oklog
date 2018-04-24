@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/oklog/oklog/pkg/cluster"
+	"github.com/oklog/oklog/pkg/event"
 	"github.com/oklog/oklog/pkg/fs"
 	"github.com/oklog/ulid"
 )
@@ -63,8 +64,8 @@ func TestAPIReplicateAndQuery(t *testing.T) {
 	var (
 		filesys       = fs.NewVirtualFilesystem()
 		baseLogger    = log.NewLogfmtLogger(os.Stderr)
-		logReporter   = LogReporter{log.With(baseLogger, "component", "FileLog")}
-		demuxReporter = LogReporter{log.With(baseLogger, "component", "Demuxer")}
+		logReporter   = event.LogReporter{log.With(baseLogger, "component", "FileLog")}
+		demuxReporter = event.LogReporter{log.With(baseLogger, "component", "Demuxer")}
 	)
 	stageLog, err := NewFileLog(filesys, "/stage", 10240, 1024, logReporter)
 	if err != nil {
@@ -170,7 +171,7 @@ func newFixtureAPI(filsys fs.Filesystem, stageLog Log, topicLogs TopicLogs) *API
 	// Build an API around that file log.
 	var (
 		baseLogger         = log.NewLogfmtLogger(os.Stderr)
-		apiReporter        = LogReporter{log.With(baseLogger, "component", "API")}
+		apiReporter        = event.LogReporter{log.With(baseLogger, "component", "API")}
 		peer               = mockClusterPeer{}
 		queryClient        = mockDoer{}
 		streamClient       = mockDoer{}

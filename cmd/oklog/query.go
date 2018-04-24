@@ -13,6 +13,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/oklog/oklog/pkg/record"
 	"github.com/oklog/oklog/pkg/store"
 	"github.com/oklog/ulid"
 )
@@ -111,7 +112,7 @@ func runQuery(args []string) error {
 		return errors.Errorf("%s %s: %s", req.Method, req.URL.String(), resp.Status)
 	}
 
-	var result store.QueryResult
+	var result record.QueryResult
 	if err := result.DecodeFrom(resp); err != nil {
 		return errors.Wrap(err, "decoding query result")
 	}
