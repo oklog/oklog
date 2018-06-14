@@ -204,8 +204,11 @@ func (c *Consumer) gather() stateFn {
 	}
 
 	// Merge the segment into our active segment.
-	var cw countingWriter
-	if _, _, _, err := mergeRecords(c.active, io.TeeReader(readResp.Body, &cw)); err != nil {
+	var (
+		cw  countingWriter
+		tmp bytes.Buffer
+	)
+	if _, _, _, err := mergeRecords(&tmp, c.active, io.TeeReader(readResp.Body, &cw)); err != nil {
 		c.reporter.ReportEvent(Event{
 			Op: "gather", Error: err,
 			Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, "mergeRecords"),
@@ -213,6 +216,7 @@ func (c *Consumer) gather() stateFn {
 		c.gatherErrors++
 		return c.fail // fail everything, same as above
 	}
+	c.active = &tmp
 	if c.activeSince.IsZero() {
 		c.activeSince = time.Now()
 	}
