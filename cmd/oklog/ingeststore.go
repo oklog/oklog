@@ -191,6 +191,11 @@ func runIngestStore(args []string) error {
 		Help:      "API request duration in seconds.",
 		Buckets:   prometheus.DefBuckets,
 	}, []string{"method", "path", "status_code"})
+	compactBytesWritten := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "oklog",
+		Name:      "store_compact_bytes_written",
+		Help:      "Number of bytes written during compaction.",
+	})
 	prometheus.MustRegister(
 		connectedClients,
 		ingestWriterBytes,
@@ -203,6 +208,7 @@ func runIngestStore(args []string) error {
 		committedSegments,
 		committedBytes,
 		compactDuration,
+		compactBytesWritten,
 		consumedSegments,
 		consumedBytes,
 		replicatedSegments,
@@ -456,6 +462,7 @@ func runIngestStore(args []string) error {
 			*segmentRetain,
 			*segmentPurge,
 			compactDuration,
+			compactBytesWritten,
 			trashedSegments,
 			purgedSegments,
 			store.LogReporter{Logger: log.With(logger, "component", "Compacter")},

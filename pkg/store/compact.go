@@ -19,6 +19,7 @@ type Compacter struct {
 	purge             time.Duration
 	stop              chan chan struct{}
 	compactDuration   *prometheus.HistogramVec
+	compactBytesWritten  prometheus.Counter
 	trashSegments     *prometheus.CounterVec
 	purgeSegments     *prometheus.CounterVec
 	reporter          EventReporter
@@ -29,7 +30,7 @@ type Compacter struct {
 func NewCompacter(
 	log Log,
 	segmentTargetSize int64, retain time.Duration, purge time.Duration,
-	compactDuration *prometheus.HistogramVec, trashSegments, purgeSegments *prometheus.CounterVec,
+	compactDuration *prometheus.HistogramVec, compactBytesWritten prometheus.Counter, trashSegments, purgeSegments *prometheus.CounterVec,
 	reporter EventReporter,
 ) *Compacter {
 	return &Compacter{
@@ -41,6 +42,7 @@ func NewCompacter(
 		trashSegments:     trashSegments,
 		purgeSegments:     purgeSegments,
 		compactDuration:   compactDuration,
+		compactBytesWritten: compactBytesWritten,
 		reporter:          reporter,
 	}
 }
@@ -123,7 +125,8 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 	for i, readSegment := range readSegments {
 		readers[i] = readSegment
 	}
-	if _, err := mergeRecordsToLog(c.log, c.segmentTargetSize, readers...); err != nil {
+	nbytes, err := mergeRecordsToLog(c.log, c.segmentTargetSize, readers...)
+	if err != nil {
 		c.reporter.ReportEvent(Event{
 			Op: "compact", Error: err,
 			Msg: fmt.Sprintf("compact %s failed during mergeRecordsToLog", kind),
@@ -131,6 +134,7 @@ func (c *Compacter) compact(kind string, getSegments func() ([]ReadSegment, erro
 		return 0, "Error"
 	}
 
+	c.compactBytesWritten.Add(float64(nbytes))
 	// We've successfully written the merged segment(s).
 	// Purge the read segments that were compacted.
 	for _, readSegment := range readSegments {
