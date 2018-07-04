@@ -196,6 +196,8 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 		chosenIndex int
 		chosenULID  ulid.ULID
 	)
+
+	var nCompleted int64 = 0
 	for {
 		// Choose the smallest ULID.
 		chosenIndex = -1
@@ -226,12 +228,13 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 		high = chosenULID // record most recent as high
 
 		// Write the record.
-		n0, err := writeSegment.Write(record[chosenIndex])
+		_, err := writeSegment.Write(record[chosenIndex])
 		if err != nil {
 			return n, err
 		}
-		n += int64(n0)
-		nSegment += int64(n0)
+		n0 := writeSegment.Size()
+		n = nCompleted + int64(n0)
+		nSegment = int64(n0)
 
 		if nSegment >= segmentTargetSize {
 			// We've met our target size. Close the segment.
@@ -244,6 +247,8 @@ func mergeRecordsToLog(dst Log, segmentTargetSize int64, readers ...io.Reader) (
 			if err != nil {
 				return n, err
 			}
+
+			nCompleted += nSegment
 			nSegment = 0
 			first = true
 		}

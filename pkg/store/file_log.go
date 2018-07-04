@@ -43,12 +43,13 @@ type fileLog struct {
 	releaser          fs.Releaser // for the LOCK
 	segmentTargetSize int64
 	segmentBufferSize int64
+	compression       string
 	reporter          EventReporter
 }
 
 // NewFileLog returns a Log backed by the filesystem at path root.
 // Note that we don't own segment files! They may disappear.
-func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64, reporter EventReporter) (Log, error) {
+func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBufferSize int64, compression string, reporter EventReporter) (Log, error) {
 	if reporter == nil {
 		reporter = LogReporter{log.NewNopLogger()}
 	}
@@ -74,17 +75,25 @@ func NewFileLog(filesys fs.Filesystem, root string, segmentTargetSize, segmentBu
 		releaser:          r,
 		segmentTargetSize: segmentTargetSize,
 		segmentBufferSize: segmentBufferSize,
+		compression:       compression,
 		reporter:          reporter,
 	}, nil
 }
 
 func (fl *fileLog) Create() (WriteSegment, error) {
-	filename := filepath.Join(fl.root, fmt.Sprintf("%s%s", uuid.New(), extActive))
+	filename := filepath.Join(fl.root, fmt.Sprintf("%s%s%s", uuid.New(), fl.ext(extActive), compressionToExt[fl.compression]))
 	f, err := fl.filesys.Create(filename)
 	if err != nil {
 		return nil, err
 	}
-	return &fileWriteSegment{fl.filesys, f}, nil
+
+	cf, err := newCompressedWriter(fl.compression, f)
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+
+	return &fileWriteSegment{fl.filesys, f, cf}, nil
 }
 
 func (fl *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
@@ -135,7 +144,7 @@ func (fl *fileLog) Overlapping() ([]ReadSegment, error) {
 		if info.IsDir() {
 			return nil // descend
 		}
-		if filepath.Ext(path) != extFlushed {
+		if firstExt(path) != extFlushed {
 			return nil // skip
 		}
 		if _, _, err := parseFilename(path); err != nil {
@@ -216,7 +225,7 @@ func (fl *fileLog) Sequential() ([]ReadSegment, error) {
 		if info.IsDir() {
 			return nil // descend
 		}
-		if filepath.Ext(path) != extFlushed {
+		if firstExt(path) != extFlushed {
 			return nil // skip
 		}
 		a, _, err := parseFilename(path)
@@ -272,7 +281,7 @@ func (fl *fileLog) Trashable(oldestRecord time.Time) ([]ReadSegment, error) {
 		if info.IsDir() {
 			return nil // descend
 		}
-		if filepath.Ext(path) != extFlushed {
+		if firstExt(path) != extFlushed {
 			return nil // skip
 		}
 		_, high, err := parseFilename(path)
@@ -321,7 +330,7 @@ func (fl *fileLog) Purgeable(oldestModTime time.Time) ([]TrashSegment, error) {
 		if info.IsDir() {
 			return nil // descend
 		}
-		if filepath.Ext(path) != extTrashed {
+		if firstExt(path) != extTrashed {
 			return nil // skip
 		}
 		if info.ModTime().Before(oldestModTime) {
@@ -354,7 +363,7 @@ func (fl *fileLog) Stats() (LogStats, error) {
 		if info.IsDir() {
 			return nil // recurse
 		}
-		switch filepath.Ext(path) {
+		switch firstExt(path) {
 		case extActive:
 			stats.ActiveSegments++
 			stats.ActiveBytes += info.Size()
@@ -377,6 +386,10 @@ func (fl *fileLog) Close() error {
 	return fl.releaser.Release()
 }
 
+func (fl *fileLog) ext(ext string) string {
+	return ext + compressionToExt[fl.compression]
+}
+
 func recoverSegments(filesys fs.Filesystem, root string) error {
 	var toRename, toReprocess []string
 	filesys.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -386,7 +399,7 @@ func recoverSegments(filesys fs.Filesystem, root string) error {
 		if info.IsDir() {
 			return nil // recurse
 		}
-		switch filepath.Ext(path) {
+		switch firstExt(path) {
 		case extActive:
 			toReprocess = append(toReprocess, path)
 		case extReading:
@@ -403,15 +416,22 @@ func recoverSegments(filesys fs.Filesystem, root string) error {
 		if err != nil {
 			return err
 		}
-		lo, hi, _, err := mergeRecords(ioutil.Discard, f)
-		f.Close() // ignore error, for now
+
+		ce := secondExt(path)
+		cf, err := newCompressedReader(extToCompression[ce], f)
+		if err != nil {
+			return err
+		}
+
+		lo, hi, _, err := mergeRecords(ioutil.Discard, cf)
+		cf.Close() // ignore error, for now
 		if err != nil {
 			return err
 		}
 		var (
 			oldname = path
 			oldpath = filepath.Dir(oldname)
-			newname = filepath.Join(oldpath, fmt.Sprintf("%s-%s%s", lo, hi, extFlushed))
+			newname = filepath.Join(oldpath, fmt.Sprintf("%s-%s%s%s", lo, hi, extFlushed, ce))
 		)
 		if err := filesys.Rename(oldname, newname); err != nil {
 			return err
@@ -484,7 +504,7 @@ func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []readSeg
 		}
 		// We should query .reading segments, too.
 		// Better to get duplicates than miss records.
-		if ext := filepath.Ext(path); !(ext == extFlushed || ext == extReading) {
+		if ext := firstExt(path); !(ext == extFlushed || ext == extReading) {
 			return nil // skip
 		}
 		low, high, err := parseFilename(path)
@@ -506,19 +526,28 @@ func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []readSeg
 			return nil
 		}
 		file, err := fl.filesys.Open(path)
-		switch err {
-		case nil:
-			segments = append(segments, readSegment{path, file, info.Size()})
-		case os.ErrNotExist:
+		if err == os.ErrNotExist {
 			fl.reporter.ReportEvent(Event{
 				Op: "queryMatchingSegments", File: path, Warning: err,
 				Msg: "this can happen due to e.g. compaction",
 			})
-		default:
+			return nil
+		}
+		if err != nil {
 			fl.reporter.ReportEvent(Event{
 				Op: "queryMatchingSegments", File: path, Error: err,
 			})
+			return nil
 		}
+		cfile, err := newCompressedReader(extToCompression[secondExt(path)], file)
+		if err != nil {
+			fl.reporter.ReportEvent(Event{
+				Op: "queryMatchingSegments", File: path, Error: err,
+			})
+			return nil
+		}
+
+		segments = append(segments, readSegment{path, cfile, info.Size()})
 		return nil
 	})
 	sort.Slice(segments, func(i, j int) bool {
@@ -532,20 +561,22 @@ func (fl *fileLog) queryMatchingSegments(from, to ulid.ULID) (segments []readSeg
 type fileWriteSegment struct {
 	fs fs.Filesystem
 	f  fs.File
+	cf compressedWriter
 }
 
 func (w fileWriteSegment) Write(p []byte) (int, error) {
-	return w.f.Write(p)
+	return w.cf.Write(p)
 }
 
 // Close the segment and make it available for query.
 func (w fileWriteSegment) Close(low, high ulid.ULID) error {
-	if err := w.f.Close(); err != nil {
+	if err := w.cf.Close(); err != nil {
 		return err
 	}
 	oldname := w.f.Name()
+	_, ce := exts(oldname)
 	oldpath := filepath.Dir(oldname)
-	newname := filepath.Join(oldpath, fmt.Sprintf("%s-%s%s", low.String(), high.String(), extFlushed))
+	newname := filepath.Join(oldpath, fmt.Sprintf("%s-%s%s%s", low.String(), high.String(), extFlushed, ce))
 	if w.fs.Exists(newname) {
 		return errors.Errorf("file %s already exists", newname)
 	}
@@ -560,13 +591,20 @@ func (w fileWriteSegment) Delete() error {
 	return w.fs.Remove(w.f.Name())
 }
 
+func (w fileWriteSegment) Size() int64 {
+	return w.cf.size()
+}
+
 type fileReadSegment struct {
 	fs fs.Filesystem
 	f  fs.File
+	cf  compressedReader
 }
 
 func newFileReadSegment(fs fs.Filesystem, path string) (fileReadSegment, error) {
-	if filepath.Ext(path) != extFlushed {
+	se, ce := exts(path)
+
+	if se != extFlushed {
 		return fileReadSegment{}, errors.Errorf("newFileReadSegment from non-flushed file %s", path)
 	}
 	oldpath := path
@@ -578,15 +616,22 @@ func newFileReadSegment(fs fs.Filesystem, path string) (fileReadSegment, error) 
 	if err != nil {
 		return fileReadSegment{}, err
 	}
-	return fileReadSegment{fs, f}, nil
+
+	cf, err := newCompressedReader(extToCompression[ce], f)
+	if err != nil {
+		f.Close()
+		return fileReadSegment{}, err
+	}
+
+	return fileReadSegment{fs, f, cf}, nil
 }
 
 func (r fileReadSegment) Read(p []byte) (int, error) {
-	return r.f.Read(p)
+	return r.cf.Read(p)
 }
 
 func (r fileReadSegment) Reset() error {
-	if err := r.f.Close(); err != nil {
+	if err := r.cf.Close(); err != nil {
 		return err
 	}
 	oldpath := r.f.Name()
@@ -595,7 +640,7 @@ func (r fileReadSegment) Reset() error {
 }
 
 func (r fileReadSegment) Trash() error {
-	if err := r.f.Close(); err != nil {
+	if err := r.cf.Close(); err != nil {
 		return err
 	}
 	oldpath := r.f.Name()
@@ -607,7 +652,7 @@ func (r fileReadSegment) Trash() error {
 }
 
 func (r fileReadSegment) Purge() error {
-	if err := r.f.Close(); err != nil {
+	if err := r.cf.Close(); err != nil {
 		return err
 	}
 	return r.fs.Remove(r.f.Name())
@@ -665,12 +710,13 @@ type segmentInfo struct {
 
 func basename(path string) string {
 	base := filepath.Base(path)
-	ext := filepath.Ext(path)
-	return base[:len(base)-len(ext)]
+	ext1, ext2 := exts(path)
+	return base[:len(base)-len(ext1) - len(ext2)]
 }
 
 func modifyExtension(filename, newExt string) string {
-	return filename[:len(filename)-len(filepath.Ext(filename))] + newExt
+	se, ce := exts(filename)
+	return filename[:len(filename)-len(se)-len(ce)] + newExt + ce
 }
 
 func parseFilename(filename string) (a, b ulid.ULID, err error) {

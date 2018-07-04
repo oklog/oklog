@@ -51,6 +51,7 @@ func runIngestStore(args []string) error {
 		segmentPurge             = flagset.Duration("store.segment-purge", defaultStoreSegmentPurge, "purge deleted segment files after this long")
 		uiLocal                  = flagset.Bool("ui.local", false, "ignore embedded files and go straight to the filesystem")
 		filesystem               = flagset.String("filesystem", defaultFilesystem, "real, virtual, nop")
+		compression              = flagset.String("compression", "", "gzip, zstd")
 		clusterPeers             = stringslice{}
 	)
 	flagset.Var(&clusterPeers, "peer", "cluster peer host:port (repeatable)")
@@ -308,11 +309,16 @@ func runIngestStore(args []string) error {
 	}()
 	level.Info(logger).Log("ingest_path", *ingestPath)
 
+	if !store.IsCompressionValid(*compression) {
+		return errors.Errorf("invalid -compression %q", *compression)
+	}
+
 	// Create storelog.
 	storeLog, err := store.NewFileLog(
 		fsys,
 		*storePath,
 		*segmentTargetSize, *segmentBufferSize,
+		*compression,
 		store.LogReporter{Logger: log.With(logger, "component", "FileLog")},
 	)
 	if err != nil {
