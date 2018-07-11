@@ -16,13 +16,8 @@ type Log interface {
 	// Query written and closed segments.
 	Query(qp QueryParams, statsOnly bool) (QueryResult, error)
 
-	// Overlapping returns segments that have a high degree of time overlap and
-	// can be compacted.
-	Overlapping() ([]ReadSegment, error)
-
-	// Sequential returns segments that are small and sequential and can be
-	// compacted.
-	Sequential() ([]ReadSegment, error)
+	// Return segments for compacting.
+	ToCompact() ([]ReadSegment, error)
 
 	// Trashable segments are read segments whose newest record is older than
 	// the given time. They may be trashed, i.e. made unavailable for querying.

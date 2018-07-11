@@ -51,8 +51,7 @@ func NewCompacter(
 // Run returns when Stop is invoked.
 func (c *Compacter) Run() {
 	ops := []func(){
-		func() { c.compact("Overlapping", c.log.Overlapping) },
-		func() { c.compact("Sequential", c.log.Sequential) },
+		func() { c.compact("Compact", c.log.ToCompact) },
 		func() { c.moveToTrash() },
 		func() { c.emptyTrash() },
 	}
