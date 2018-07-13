@@ -23,6 +23,7 @@ func runQuery(args []string) error {
 		storeAddr = flagset.String("store", "localhost:7650", "address of store instance to query")
 		from      = flagset.String("from", "1h", "from, as RFC3339 timestamp or duration ago")
 		to        = flagset.String("to", "now", "to, as RFC3339 timestamp or duration ago")
+		topic     = flagset.String("topic", "", "filter records by topic")
 		q         = flagset.String("q", "", "query expression")
 		regex     = flagset.Bool("regex", false, "parse -q as regular expression")
 		stats     = flagset.Bool("stats", false, "statistics only, no records (implies -v)")
@@ -91,11 +92,12 @@ func runQuery(args []string) error {
 	}
 
 	req, err := http.NewRequest(method, fmt.Sprintf(
-		"http://%s/store%s?from=%s&to=%s&q=%s%s",
+		"http://%s/store%s?from=%s&to=%s&topic=%s&q=%s%s",
 		hostport,
 		store.APIPathUserQuery,
 		url.QueryEscape(fromStr),
 		url.QueryEscape(toStr),
+		url.QueryEscape(*topic),
 		url.QueryEscape(*q),
 		asRegex,
 	), nil)
@@ -125,6 +127,7 @@ func runQuery(args []string) error {
 	verbosePrintf("Response in %s\n", time.Since(begin))
 	verbosePrintf("Queried from %s\n", result.Params.From)
 	verbosePrintf("Queried to %s\n", result.Params.To)
+	verbosePrintf("Queried topic \"%s\"\n", result.Params.Topic)
 	verbosePrintf("Queried %s %q\n", qtype, result.Params.Q)
 	verbosePrintf("%d node(s) queried\n", result.NodesQueried)
 	verbosePrintf("%d segment(s) queried\n", result.SegmentsQueried)

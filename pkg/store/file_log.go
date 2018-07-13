@@ -87,14 +87,35 @@ func (fl *fileLog) Create() (WriteSegment, error) {
 	return &fileWriteSegment{fl.filesys, f}, nil
 }
 
+func all(filters ...recordFilter) recordFilter {
+	return func(b []byte) bool {
+		result := true
+
+		for _, f := range filters {
+			result = result && f(b)
+		}
+
+		return result
+	}
+}
+
 func (fl *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 	var (
 		begin    = time.Now()
 		segments = fl.queryMatchingSegments(qp.From.ULID, qp.To.ULID)
-		pass     = recordFilterBoundedPlain(qp.From.ULID, qp.To.ULID, []byte(qp.Q))
+		filters  = []recordFilter{recordFilterBound(qp.From.ULID, qp.To.ULID)}
 	)
-	if qp.Regex {
-		pass = recordFilterBoundedRegex(qp.From.ULID, qp.To.ULID, regexp.MustCompile(qp.Q))
+
+	if qp.Topic != "" {
+		filters = append(filters, recordFilterTopic(qp.Topic))
+	}
+
+	if qp.Q != "" {
+		if qp.Regex {
+			filters = append(filters, recordFilterRegex(regexp.MustCompile(qp.Q)))
+		} else {
+			filters = append(filters, recordFilterPlain([]byte(qp.Q)))
+		}
 	}
 
 	// Time range should be inclusive, so we need a max value here.
@@ -103,7 +124,7 @@ func (fl *fileLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
 	}
 
 	// Build the lazy reader.
-	rc, sz, err := newQueryReadCloser(fl.filesys, segments, pass, fl.segmentBufferSize, fl.reporter)
+	rc, sz, err := newQueryReadCloser(fl.filesys, segments, all(filters...), fl.segmentBufferSize, fl.reporter)
 	if err != nil {
 		return QueryResult{}, errors.Wrap(err, "constructing the lazy reader")
 	}
@@ -445,7 +466,7 @@ func recordFilterRegex(q *regexp.Regexp) recordFilter {
 	}
 }
 
-func recordFilterBoundedPlain(from, to ulid.ULID, q []byte) recordFilter {
+func recordFilterBound(from, to ulid.ULID) recordFilter {
 	fromBytes, _ := from.MarshalText()
 	fromBytes = fromBytes[:ulidTimeSize]
 	toBytes, _ := to.MarshalText()
@@ -453,21 +474,16 @@ func recordFilterBoundedPlain(from, to ulid.ULID, q []byte) recordFilter {
 	return func(b []byte) bool {
 		return len(b) > ulid.EncodedSize &&
 			bytes.Compare(b[:ulidTimeSize], fromBytes) >= 0 &&
-			bytes.Compare(b[:ulidTimeSize], toBytes) <= 0 &&
-			bytes.Contains(b[ulid.EncodedSize+1:], q)
+			bytes.Compare(b[:ulidTimeSize], toBytes) <= 0
 	}
 }
 
-func recordFilterBoundedRegex(from, to ulid.ULID, q *regexp.Regexp) recordFilter {
-	fromBytes, _ := from.MarshalText()
-	fromBytes = fromBytes[:ulidTimeSize]
-	toBytes, _ := to.MarshalText()
-	toBytes = toBytes[:ulidTimeSize]
+func recordFilterTopic(topic string) recordFilter {
+	topicBytes := []byte(topic)
+
 	return func(b []byte) bool {
-		return len(b) > ulid.EncodedSize &&
-			bytes.Compare(b[:ulidTimeSize], fromBytes) >= 0 &&
-			bytes.Compare(b[:ulidTimeSize], toBytes) <= 0 &&
-			q.Match(b[ulid.EncodedSize+1:])
+		spaceIdx := bytes.IndexByte(b[ulid.EncodedSize+1:], ' ')
+		return bytes.Compare(b[ulid.EncodedSize+1:ulid.EncodedSize+1+spaceIdx], topicBytes) == 0
 	}
 }
 

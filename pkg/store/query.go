@@ -22,6 +22,7 @@ type QueryParams struct {
 	To    ulidOrTime `json:"to"`
 	Q     string     `json:"q"`
 	Regex bool       `json:"regex"`
+	Topic string     `json:"topic"`
 }
 
 // DecodeFrom populates a QueryParams from a URL.
@@ -34,6 +35,7 @@ func (qp *QueryParams) DecodeFrom(u *url.URL, rb rangeBehavior) error {
 	}
 	qp.Q = u.Query().Get("q")
 	_, qp.Regex = u.Query()["regex"]
+	qp.Topic = u.Query().Get("topic")
 
 	if qp.Regex {
 		if _, err := regexp.Compile(qp.Q); err != nil {
@@ -100,6 +102,7 @@ type QueryResult struct {
 func (qr *QueryResult) EncodeTo(w http.ResponseWriter) {
 	w.Header().Set(httpHeaderFrom, qr.Params.From.Format(time.RFC3339))
 	w.Header().Set(httpHeaderTo, qr.Params.To.Format(time.RFC3339))
+	w.Header().Set(httpHeaderTopic, qr.Params.Topic)
 	w.Header().Set(httpHeaderQ, qr.Params.Q)
 	w.Header().Set(httpHeaderRegex, fmt.Sprint(qr.Params.Regex))
 
@@ -131,6 +134,7 @@ func (qr *QueryResult) DecodeFrom(resp *http.Response) error {
 	if err = qr.Params.To.Parse(resp.Header.Get(httpHeaderTo)); err != nil {
 		return errors.Wrap(err, "to")
 	}
+	qr.Params.Topic = resp.Header.Get(httpHeaderTopic)
 	qr.Params.Q = resp.Header.Get(httpHeaderQ)
 	if qr.Params.Regex, err = strconv.ParseBool(resp.Header.Get(httpHeaderRegex)); err != nil {
 		return errors.Wrap(err, "regex")
@@ -176,6 +180,7 @@ func (qr *QueryResult) Merge(other QueryResult) error {
 const (
 	httpHeaderFrom            = "X-Oklog-From"
 	httpHeaderTo              = "X-Oklog-To"
+	httpHeaderTopic           = "X-Oklog-Topic"
 	httpHeaderQ               = "X-Oklog-Q"
 	httpHeaderRegex           = "X-Oklog-Regex"
 	httpHeaderNodesQueried    = "X-Oklog-Nodes-Queried"

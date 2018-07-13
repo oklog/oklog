@@ -493,7 +493,7 @@ func TestConcurrentFilteringReadCloser(t *testing.T) {
 		t.Run(testcase.name, func(t *testing.T) {
 			in := bytes.NewReader(input.Bytes())
 			re := regexp.MustCompile(testcase.q)
-			pass := recordFilterBoundedRegex(testcase.from, testcase.to, re)
+			pass := all(recordFilterBound(testcase.from, testcase.to), recordFilterRegex(re))
 			rc := newConcurrentFilteringReadCloser(ioutil.NopCloser(in), pass, 1024)
 			if want, have := testcase.want, records(rc); !reflect.DeepEqual(want, have) {
 				t.Errorf("want %v, have %v", want, have)
