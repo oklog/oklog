@@ -73,12 +73,12 @@ type alias Flags =
 
 
 type alias Model =
-    { now : Time
+    { error : Maybe String
+    , now : Time
     , params : Maybe Params
     , query : Query
     , records : List Record
     , stats : Maybe Stats
-    , streamError : Maybe String
     , streamRunning : Bool
     }
 
@@ -117,7 +117,7 @@ init { now } location =
         params =
             parsePath (UrlParser.map Params paramsParser) location
     in
-        ( Model now params initQuery [] Nothing Nothing False, Cmd.none )
+        ( Model Nothing now params initQuery [] Nothing False, Cmd.none )
 
 
 initQuery : Query
@@ -227,8 +227,8 @@ update msg model =
         StatsUpdate (Ok stats) ->
             ( { model | stats = Just stats }, Cmd.none )
 
-        StatsUpdate (Err _) ->
-            ( model, Cmd.none )
+        StatsUpdate (Err err) ->
+            ( { model | error = Just ("StatsUpdateError: " ++ (httpError err)) }, Cmd.none )
 
         StreamCancel ->
             ( { model | streamRunning = False }, streamCancel "" )
@@ -237,7 +237,7 @@ update msg model =
             ( { model | streamRunning = False }, scroll "" )
 
         StreamError err ->
-            ( { model | streamError = Just err, streamRunning = False }, Cmd.none )
+            ( { model | error = Just ("StreamError: " ++ err), streamRunning = False }, Cmd.none )
 
         StreamLines lines ->
             let
@@ -420,11 +420,11 @@ viewDebug : Model -> Html Msg
 viewDebug model =
     let
         slimModel =
-            { now = model.now
+            { error = model.error
+            , now = model.now
             , params = model.params
             , query = model.query
             , stats = model.stats
-            , streamError = model.streamError
             , streamRunning = model.streamRunning
             }
     in
@@ -437,13 +437,13 @@ viewDebug model =
 
 
 viewError : Model -> Html Msg
-viewError { streamError } =
-    case streamError of
+viewError { error } =
+    case error of
         Nothing ->
             div [] []
 
         Just err ->
-            div [ class "error" ] [ text ("StreamError: " ++ err) ]
+            div [ class "error" ] [ text err ]
 
 
 viewMatchList : String -> String -> List Int -> List (Html Msg) -> List (Html Msg)
@@ -682,6 +682,25 @@ windowDuration window =
 
 
 -- HELPER
+
+
+httpError : Http.Error -> String
+httpError err =
+    case err of
+        Http.Timeout ->
+            "timeout"
+
+        Http.NetworkError ->
+            "network error"
+
+        Http.BadUrl reason ->
+            reason
+
+        Http.BadStatus res ->
+            toString res.status.code
+
+        Http.BadPayload reason _ ->
+            reason
 
 
 prettyPrintDataSet : Int -> String
