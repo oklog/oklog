@@ -78,6 +78,7 @@ type alias Model =
     , query : Query
     , records : List Record
     , stats : Maybe Stats
+    , streamError : Maybe String
     , streamRunning : Bool
     }
 
@@ -116,7 +117,7 @@ init { now } location =
         params =
             parsePath (UrlParser.map Params paramsParser) location
     in
-        ( Model now params initQuery [] Nothing False, Cmd.none )
+        ( Model now params initQuery [] Nothing Nothing False, Cmd.none )
 
 
 initQuery : Query
@@ -235,8 +236,8 @@ update msg model =
         StreamComplete _ ->
             ( { model | streamRunning = False }, scroll "" )
 
-        StreamError _ ->
-            ( { model | streamRunning = False }, Cmd.none )
+        StreamError err ->
+            ( { model | streamError = Just err, streamRunning = False }, Cmd.none )
 
         StreamLines lines ->
             let
@@ -408,7 +409,8 @@ view model =
             ]
         , footer []
             [ div [ class "container" ]
-                [ viewDebug model
+                [ viewError model
+                , viewDebug model
                 ]
             ]
         ]
@@ -422,6 +424,8 @@ viewDebug model =
             , params = model.params
             , query = model.query
             , stats = model.stats
+            , streamError = model.streamError
+            , streamRunning = model.streamRunning
             }
     in
         case showDebug model of
@@ -430,6 +434,16 @@ viewDebug model =
 
             False ->
                 div [] []
+
+
+viewError : Model -> Html Msg
+viewError { streamError } =
+    case streamError of
+        Nothing ->
+            div [] []
+
+        Just err ->
+            div [ class "error" ] [ text ("StreamError: " ++ err) ]
 
 
 viewMatchList : String -> String -> List Int -> List (Html Msg) -> List (Html Msg)

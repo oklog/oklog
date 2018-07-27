@@ -36,6 +36,16 @@ div.debug {
 	text-align: center;
 }
 
+div.error {
+	background: rgba(255, 82, 82, 0.7);
+	border: 0.1rem dashed rgb(197, 197, 197);
+	color: rgb(240, 240, 240);
+	font-family: 'Droid Sans Mono', monospace;
+	font-size: 1.6rem;
+	padding: 1.5rem;
+	text-align: center;
+}
+
 footer {
 	bottom: 0;
 	position: fixed;

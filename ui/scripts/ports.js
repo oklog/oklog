@@ -69,6 +69,8 @@
 			stream = response.body.getReader();
 
 			read();
+		}).catch(function(err) {
+		    app.ports.streamError.send(err.message);
 		});
 	});
 }).call(this);
