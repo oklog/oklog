@@ -6,8 +6,8 @@ module RFC3339
         )
 
 import Date exposing (Date)
-import Result
 import Native.RFC3339
+import Result
 
 
 decode : String -> Result String Date

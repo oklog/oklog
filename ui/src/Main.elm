@@ -24,13 +24,31 @@ import Html
         , text
         , tr
         )
-import Html.Attributes exposing (autofocus, class, disabled, for, id, placeholder, type_, value)
+import Html.Attributes
+    exposing
+        ( autofocus
+        , class
+        , disabled
+        , for
+        , id
+        , placeholder
+        , type_
+        , value
+        )
 import Html.Events exposing (on, onClick, onInput, onSubmit, targetValue)
-import Http exposing (Request, Response, emptyBody, expectStringResponse, request, send)
+import Http
+    exposing
+        ( Request
+        , Response
+        , emptyBody
+        , expectStringResponse
+        , request
+        , send
+        )
 import Json.Decode as Json
+import RFC3339
 import Task
 import Time exposing (Time, every, hour, millisecond, minute)
-import RFC3339
 
 
 main : Program Never Model Msg
@@ -190,7 +208,7 @@ update msg model =
                 records =
                     List.map parseRecord lines
             in
-                ( { model | records = (model.records ++ records) }
+                ( { model | records = model.records ++ records }
                 , Cmd.batch
                     [ streamContinue ""
                     , scroll ""
@@ -244,7 +262,7 @@ queryUrl : Time -> Query -> String
 queryUrl now query =
     let
         from =
-            Http.encodeUri (RFC3339.encode (fromTime (now - (windowDuration query.window))))
+            Http.encodeUri (RFC3339.encode (fromTime (now - windowDuration query.window)))
 
         to =
             Http.encodeUri (RFC3339.encode (fromTime now))
@@ -377,7 +395,7 @@ viewMatchList query line indexes elements =
             if String.length line == 0 then
                 elements
             else
-                elements ++ ([ span [] [ text line ] ])
+                elements ++ [ span [] [ text line ] ]
 
         Just index ->
             let
@@ -407,7 +425,7 @@ viewPlan stats =
                             "1 node"
 
                         _ ->
-                            (toString stats.nodesQueried) ++ " nodes"
+                            toString stats.nodesQueried ++ " nodes"
 
                 segmentsText =
                     case stats.segmentsQueried of
@@ -415,7 +433,7 @@ viewPlan stats =
                             "1 segment"
 
                         _ ->
-                            (toString stats.segmentsQueried) ++ " segments"
+                            toString stats.segmentsQueried ++ " segments"
 
                 elements =
                     [ span [] [ text "Your query could return " ]
@@ -459,7 +477,7 @@ viewResultInfo numRecords =
             else
                 span []
                     [ text "Displaying "
-                    , strong [] [ text ((toString numRecords) ++ " records") ]
+                    , strong [] [ text (toString numRecords ++ " records") ]
                     ]
     in
         div [ class "result-info" ] [ recordCount ]
@@ -617,4 +635,4 @@ prettyPrintDataSet size =
     else if size > 1000 then
         toString (size // 1000) ++ "kB"
     else
-        (toString size) ++ "Bytes"
+        toString size ++ "Bytes"
