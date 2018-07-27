@@ -46,14 +46,16 @@ import Http
         , send
         )
 import Json.Decode as Json
+import Navigation
 import RFC3339
 import Task
 import Time exposing (Time, every, hour, millisecond, minute)
+import UrlParser exposing ((<?>), parsePath, stringParam, top)
 
 
 main : Program Flags Model Msg
 main =
-    Html.programWithFlags
+    Navigation.programWithFlags (\loc -> Nop)
         { init = init
         , subscriptions = subscriptions
         , update = update
@@ -72,6 +74,7 @@ type alias Flags =
 
 type alias Model =
     { now : Time
+    , params : Maybe Params
     , query : Query
     , records : List Record
     , stats : Maybe Stats
@@ -101,9 +104,19 @@ type alias Stats =
     }
 
 
-init : Flags -> ( Model, Cmd Msg )
-init { now } =
-    ( Model now initQuery [] Nothing False, Cmd.none )
+type alias Params =
+    { path : String
+    , debug : Bool
+    }
+
+
+init : Flags -> Navigation.Location -> ( Model, Cmd Msg )
+init { now } location =
+    let
+        params =
+            parsePath (UrlParser.map Params paramsParser) location
+    in
+        ( Model now params initQuery [] Nothing False, Cmd.none )
 
 
 initQuery : Query
@@ -116,12 +129,33 @@ initStats =
     Stats 0 0 0 0
 
 
+paramsParser : UrlParser.Parser (String -> Bool -> Params) Params
+paramsParser =
+    UrlParser.string <?> boolParam "debug"
+
+
+boolParam : String -> UrlParser.QueryParser (Bool -> a) a
+boolParam name =
+    UrlParser.customParam name boolParamExtract
+
+
+boolParamExtract : Maybe String -> Bool
+boolParamExtract maybeValue =
+    case maybeValue of
+        Nothing ->
+            False
+
+        Just _ ->
+            True
+
+
 
 -- UPDATE
 
 
 type Msg
-    = Plan Time
+    = Nop
+    | Plan Time
     | QueryFormSubmit
     | QueryRegexUpdate String
     | QueryTermUpdate String
@@ -137,6 +171,9 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        Nop ->
+            ( model, Cmd.none )
+
         Plan now ->
             let
                 cmd =
@@ -382,11 +419,17 @@ viewDebug model =
     let
         slimModel =
             { now = model.now
+            , params = model.params
             , query = model.query
             , stats = model.stats
             }
     in
-        div [ class "debug" ] [ text (toString slimModel) ]
+        case showDebug model of
+            True ->
+                div [ class "debug" ] [ text (toString slimModel) ]
+
+            False ->
+                div [] []
 
 
 viewMatchList : String -> String -> List Int -> List (Html Msg) -> List (Html Msg)
@@ -637,3 +680,13 @@ prettyPrintDataSet size =
         toString (size // 1000) ++ "kB"
     else
         toString size ++ "Bytes"
+
+
+showDebug : Model -> Bool
+showDebug model =
+    case model.params of
+        Nothing ->
+            False
+
+        Just params ->
+            params.debug
