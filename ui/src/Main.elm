@@ -13,7 +13,7 @@ import Html
         , label
         , nav
         , option
-        , program
+        , programWithFlags
         , section
         , select
         , span
@@ -51,9 +51,9 @@ import Task
 import Time exposing (Time, every, hour, millisecond, minute)
 
 
-main : Program Never Model Msg
+main : Program Flags Model Msg
 main =
-    program
+    Html.programWithFlags
         { init = init
         , subscriptions = subscriptions
         , update = update
@@ -63,6 +63,11 @@ main =
 
 
 -- MODEL
+
+
+type alias Flags =
+    { now : Time
+    }
 
 
 type alias Model =
@@ -96,9 +101,9 @@ type alias Stats =
     }
 
 
-init : ( Model, Cmd Msg )
-init =
-    ( Model 0 initQuery [] Nothing False, Task.perform Now Time.now )
+init : Flags -> ( Model, Cmd Msg )
+init { now } =
+    ( Model now initQuery [] Nothing False, Cmd.none )
 
 
 initQuery : Query
@@ -116,8 +121,7 @@ initStats =
 
 
 type Msg
-    = Now Time
-    | Plan Time
+    = Plan Time
     | QueryFormSubmit
     | QueryRegexUpdate String
     | QueryTermUpdate String
@@ -133,9 +137,6 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        Now now ->
-            ( { model | now = now }, Cmd.none )
-
         Plan now ->
             let
                 cmd =
