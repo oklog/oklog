@@ -11,7 +11,7 @@ help:
 	@echo "make accept            Run all checks and tests"
 
 bundle: $(GOBIN)/esc
-	$(GOBIN)/esc -private -pkg ui -ignore '.git*|elm-*|node_modules|src|tests|Makefile|package-lock.json' -o ../pkg/ui/static.go .
+	cd .. && $(GOBIN)/esc -ignore '.git*|elm-*|node_modules|src|tests|Makefile|package-lock.json' -o ./pkg/ui/static.go -pkg ui -prefix ui -private ./ui
 
 compile: $(NODEBIN)/elm-make
 	$(NODEBIN)/elm-make --yes src/Main.elm --output=scripts/oklog.js
