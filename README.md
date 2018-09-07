@@ -1,3 +1,12 @@
+# OK Log is archived
+
+I hoped to find the opportunity to continue developing OK Log after the spike of its creation.
+Unfortunately, despite effort, no such opportunity presented itself.
+Please look at OK Log for inspiration, and consider using the (maintained!) projects that came from it,
+[ulid](https://github.com/oklog/ulid) and [run](https://github.com/oklog/run).
+
+---
+
 <p align="center">
 <img src="oklog.png" width=500 height=142 alt="OK Log"/><br/>
 <a href="https://github.com/oklog/oklog/releases/latest"><img src="https://img.shields.io/github/release/oklog/oklog.svg?style=flat-square"/></a>
