@@ -109,7 +109,7 @@ func newFixtureAPI(t *testing.T) (*API, error) {
 
 	// Construct a virtual file log.
 	filesys := fs.NewVirtualFilesystem()
-	filelog, err := NewFileLog(filesys, "/", 10240, 1024, logReporter)
+	filelog, err := NewFileLog(filesys, "/", 10240, 1024, "", logReporter)
 	if err != nil {
 		return nil, err
 	}

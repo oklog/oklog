@@ -94,7 +94,7 @@ func TestRecoverSegments(t *testing.T) {
 		segmentTargetSize = 10 * 1024
 		segmentBufferSize = 1024
 	)
-	filelog, err := NewFileLog(filesys, "", segmentTargetSize, segmentBufferSize, nil)
+	filelog, err := NewFileLog(filesys, "", segmentTargetSize, segmentBufferSize, "", nil)
 	if err != nil {
 		t.Fatalf("NewFileLog: %v", err)
 	}
@@ -150,13 +150,13 @@ func TestLockBehavior(t *testing.T) {
 			f.Close()
 
 			// NewFileLog should manage this fine.
-			filelog, err := NewFileLog(filesys, root, 1024, 1024, nil)
+			filelog, err := NewFileLog(filesys, root, 1024, 1024, "", nil)
 			if err != nil {
 				t.Fatalf("initial NewFileLog: %v", err)
 			}
 
 			// But a second FileLog should fail.
-			if _, err := NewFileLog(filesys, root, 1024, 1024, nil); err == nil {
+			if _, err := NewFileLog(filesys, root, 1024, 1024, "", nil); err == nil {
 				t.Fatalf("second NewFileLog: want error, have none")
 			} else {
 				t.Logf("second NewFileLog: got expected error: %v", err)
@@ -189,7 +189,7 @@ func TestBadSegment(t *testing.T) {
 	}
 
 	// Create a filelog around that filesys.
-	filelog, _ := NewFileLog(filesys, "/", 1024, 1024, nil)
+	filelog, _ := NewFileLog(filesys, "/", 1024, 1024, "", nil)
 
 	// Perform some read op on the filelog, to trigger rm.
 	// Main thing here is just that it doesn't panic.

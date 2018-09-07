@@ -49,6 +49,7 @@ type WriteSegment interface {
 	io.Writer
 	Close(low, high ulid.ULID) error
 	Delete() error
+	Size() int64
 }
 
 // ReadSegment can be read from, reset (back to flushed state), trashed (made

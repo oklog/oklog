@@ -171,7 +171,7 @@ func BenchmarkMergeRecordsToLog(b *testing.B) {
 		charset           = "0123456789ABCDEFGHJKMNPQRSTVWXYZ "
 	)
 
-	dst, err := NewFileLog(fs.NewNopFilesystem(), "/", segmentTargetSize, segmentBufferSize, nil)
+	dst, err := NewFileLog(fs.NewNopFilesystem(), "/", segmentTargetSize, segmentBufferSize, "", nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -550,7 +550,7 @@ type mockLog struct {
 }
 
 func (log *mockLog) Create() (WriteSegment, error) {
-	return &mockWriteSegment{log.Buffer}, nil
+	return &mockWriteSegment{log.Buffer, 0}, nil
 }
 
 func (log *mockLog) Query(qp QueryParams, statsOnly bool) (QueryResult, error) {
@@ -579,7 +579,19 @@ func (log *mockLog) Stats() (LogStats, error) {
 
 func (log *mockLog) Close() error { return nil }
 
-type mockWriteSegment struct{ *bytes.Buffer }
+type mockWriteSegment struct{
+	*bytes.Buffer
+	sz int64
+}
 
 func (mockWriteSegment) Close(ulid.ULID, ulid.ULID) error { return nil }
 func (mockWriteSegment) Delete() error                    { return nil }
+func (w *mockWriteSegment) Size() int64                      { return w.sz }
+func (w *mockWriteSegment) Write(p []byte) (int, error) {
+	n, err := w.Buffer.Write(p)
+	if err == nil {
+		w.sz += int64(n)
+	}
+
+	return n, err
+}
