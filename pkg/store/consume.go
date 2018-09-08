@@ -102,128 +102,134 @@ func (c *Consumer) Stop() {
 type stateFn func() stateFn
 
 func (c *Consumer) gather() stateFn {
-	// A naïve way to break out of the gather loop in atypical conditions.
-	// TODO(pb): this obviously needs more thought and consideration
-	instances := c.peer.Current(cluster.PeerTypeIngest)
-	if c.gatherErrors > 0 && c.gatherErrors > 2*len(instances) {
-		if c.active.Len() <= 0 {
-			// We didn't successfully consume any segments.
-			// Nothing to do but reset and try again.
-			c.gatherErrors = 0
+	startTime := time.Now()
+	instance := ""
+	for time.Since(startTime) < c.segmentDelay {
+		// A naïve way to break out of the gather loop in atypical conditions.
+		// TODO(pb): this obviously needs more thought and consideration
+		instances := c.peer.Current(cluster.PeerTypeIngest)
+		if c.gatherErrors > 0 && c.gatherErrors > 2*len(instances) {
+			if c.active.Len() <= 0 {
+				// We didn't successfully consume any segments.
+				// Nothing to do but reset and try again.
+				c.gatherErrors = 0
+				return c.gather
+			}
+			// We consumed some segment, at least.
+			// Press forward to persistence.
+			return c.replicate
+		}
+		if len(instances) == 0 {
+			return c.gather // maybe some will come back later
+		}
+		if want, have := c.replicationFactor, len(c.peer.Current(cluster.PeerTypeStore)); have < want {
+			// Don't gather if we can't replicate.
+			// Better to queue up on the ingesters.
+			c.reporter.ReportEvent(Event{
+				Op: "gather", Warning: fmt.Errorf("replication factor %d, available peers %d: replication currently impossible", want, have),
+			})
+			time.Sleep(time.Second)
+			c.gatherErrors++
 			return c.gather
 		}
-		// We consumed some segment, at least.
-		// Press forward to persistence.
-		return c.replicate
-	}
-	if len(instances) == 0 {
-		return c.gather // maybe some will come back later
-	}
-	if want, have := c.replicationFactor, len(c.peer.Current(cluster.PeerTypeStore)); have < want {
-		// Don't gather if we can't replicate.
-		// Better to queue up on the ingesters.
-		c.reporter.ReportEvent(Event{
-			Op: "gather", Warning: fmt.Errorf("replication factor %d, available peers %d: replication currently impossible", want, have),
-		})
-		time.Sleep(time.Second)
-		c.gatherErrors++
-		return c.gather
-	}
 
-	// More typical exit clauses.
-	var (
-		tooBig = int64(c.active.Len()) > c.segmentTargetSize
-		tooOld = !c.activeSince.IsZero() && time.Since(c.activeSince) > c.segmentTargetAge
-	)
-	if tooBig || tooOld {
-		return c.replicate
-	}
+		// More typical exit clauses.
+		var (
+			tooBig = int64(c.active.Len()) > c.segmentTargetSize
+			tooOld = !c.activeSince.IsZero() && time.Since(c.activeSince) > c.segmentTargetAge
+		)
+		if tooBig || tooOld {
+			return c.replicate
+		}
 
-	// Get the oldest segment ID from a random ingester.
-	instance := instances[rand.Intn(len(instances))]
-	nextResp, err := c.client.Get(fmt.Sprintf("http://%s/ingest%s", instance, ingest.APIPathNext))
-	if err != nil {
-		c.reporter.ReportEvent(Event{
-			Op: "gather", Warning: err,
-			Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, ingest.APIPathNext),
-		})
-		c.gatherErrors++
-		return c.gather
-	}
-	defer nextResp.Body.Close()
-	nextRespBody, err := ioutil.ReadAll(nextResp.Body)
-	if err != nil {
-		c.reporter.ReportEvent(Event{
-			Op: "gather", Warning: err,
-			Msg: fmt.Sprintf("ingester %s, during %s: read error", instance, ingest.APIPathNext),
-		})
-		c.gatherErrors++
-		return c.gather
-	}
-	nextID := strings.TrimSpace(string(nextRespBody))
-	if nextResp.StatusCode == http.StatusNotFound {
-		// Normal, when the ingester has no more segments to give right now.
-		c.gatherErrors++ // after enough of these errors, we should replicate
-		return c.gather
-	}
-	if nextResp.StatusCode != http.StatusOK {
-		c.reporter.ReportEvent(Event{
-			Op: "gather", Warning: fmt.Errorf(nextResp.Status),
-			Msg: fmt.Sprintf("ingester %s, during %s: bad response code", instance, ingest.APIPathNext),
-		})
-		c.gatherErrors++
-		return c.gather
-	}
+		// Get the oldest segment ID from a random ingester. Stick to this ingester until time slot end or error.
+		if instance == "" {
+			instance = instances[rand.Intn(len(instances))]
+		}
+		nextResp, err := c.client.Get(fmt.Sprintf("http://%s/ingest%s", instance, ingest.APIPathNext))
+		if err != nil {
+			c.reporter.ReportEvent(Event{
+				Op: "gather", Warning: err,
+				Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, ingest.APIPathNext),
+			})
+			c.gatherErrors++
+			return c.gather
+		}
+		defer nextResp.Body.Close()
+		nextRespBody, err := ioutil.ReadAll(nextResp.Body)
+		if err != nil {
+			c.reporter.ReportEvent(Event{
+				Op: "gather", Warning: err,
+				Msg: fmt.Sprintf("ingester %s, during %s: read error", instance, ingest.APIPathNext),
+			})
+			c.gatherErrors++
+			return c.gather
+		}
+		if nextResp.StatusCode == http.StatusNotFound {
+			// Normal, when the ingester has no more segments to give right now.
+			c.gatherErrors++ // after enough of these errors, we should replicate
+			return c.gather
+		}
+		if nextResp.StatusCode != http.StatusOK {
+			c.reporter.ReportEvent(Event{
+				Op: "gather", Warning: fmt.Errorf(nextResp.Status),
+				Msg: fmt.Sprintf("ingester %s, during %s: bad response code", instance, ingest.APIPathNext),
+			})
+			c.gatherErrors++
+			return c.gather
+		}
+		nextID := strings.TrimSpace(string(nextRespBody))
 
-	// Mark the segment ID as pending.
-	// From this point forward, we must either commit or fail the segment.
-	// If we do neither, it will eventually time out, but we should be nice.
-	c.pending[instance] = append(c.pending[instance], nextID)
+		// Mark the segment ID as pending.
+		// From this point forward, we must either commit or fail the segment.
+		// If we do neither, it will eventually time out, but we should be nice.
+		c.pending[instance] = append(c.pending[instance], nextID)
 
-	// Read the segment.
-	readResp, err := c.client.Get(fmt.Sprintf("http://%s/ingest%s?id=%s", instance, ingest.APIPathRead, nextID))
-	if err != nil {
-		// Reading failed, so we can't possibly commit the segment.
-		// The simplest thing to do now is to fail everything.
-		// TODO(pb): this could be improved i.e. made more granular
-		c.reporter.ReportEvent(Event{
-			Op: "gather", Error: err,
-			Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, ingest.APIPathRead),
-		})
-		c.gatherErrors++
-		return c.fail // fail everything
-	}
-	defer readResp.Body.Close()
-	if readResp.StatusCode != http.StatusOK {
-		c.reporter.ReportEvent(Event{
-			Op: "gather", Error: fmt.Errorf(readResp.Status),
-			Msg: fmt.Sprintf("ingester %s, during %s: bad response code", instance, ingest.APIPathRead),
-		})
-		c.gatherErrors++
-		return c.fail // fail everything, same as above
-	}
+		// Read the segment.
+		readResp, err := c.client.Get(fmt.Sprintf("http://%s/ingest%s?id=%s", instance, ingest.APIPathRead, nextID))
+		if err != nil {
+			// Reading failed, so we can't possibly commit the segment.
+			// The simplest thing to do now is to fail everything.
+			// TODO(pb): this could be improved i.e. made more granular
+			c.reporter.ReportEvent(Event{
+				Op: "gather", Error: err,
+				Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, ingest.APIPathRead),
+			})
+			c.gatherErrors++
+			return c.fail // fail everything
+		}
+		defer readResp.Body.Close()
+		if readResp.StatusCode != http.StatusOK {
+			c.reporter.ReportEvent(Event{
+				Op: "gather", Error: fmt.Errorf(readResp.Status),
+				Msg: fmt.Sprintf("ingester %s, during %s: bad response code", instance, ingest.APIPathRead),
+			})
+			c.gatherErrors++
+			return c.fail // fail everything, same as above
+		}
 
-	// Merge the segment into our active segment.
-	var (
-		cw  countingWriter
-		tmp bytes.Buffer
-	)
-	if _, _, _, err := mergeRecords(&tmp, c.active, io.TeeReader(readResp.Body, &cw)); err != nil {
-		c.reporter.ReportEvent(Event{
-			Op: "gather", Error: err,
-			Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, "mergeRecords"),
-		})
-		c.gatherErrors++
-		return c.fail // fail everything, same as above
-	}
-	c.active = &tmp
-	if c.activeSince.IsZero() {
-		c.activeSince = time.Now()
-	}
+        // Merge the segment into our active segment.
+        var (
+            cw countingWriter
+            tmp bytes.Buffer
+        )
+        if _, _, _, err := mergeRecords(&tmp, c.active, io.TeeReader(readResp.Body, &cw)); err != nil {
+			c.reporter.ReportEvent(Event{
+				Op: "gather", Error: err,
+				Msg: fmt.Sprintf("ingester %s, during %s: fatal error", instance, "mergeRecords"),
+			})
+			c.gatherErrors++
+			return c.fail // fail everything, same as above
+		}
+        c.active = &tmp
+		if c.activeSince.IsZero() {
+			c.activeSince = time.Now()
+		}
 
-	// Repeat!
-	c.consumedSegments.Inc()
-	c.consumedBytes.Add(float64(cw.n))
+		// Repeat!
+		c.consumedSegments.Inc()
+		c.consumedBytes.Add(float64(cw.n))
+	}
 	return c.gather
 }
 
