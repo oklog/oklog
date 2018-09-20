@@ -205,7 +205,7 @@ func (fl *fileLog) Overlapping() ([]ReadSegment, error) {
 	return readSegments, nil
 }
 
-func (fl *fileLog) Sequential() ([]ReadSegment, error) {
+func (fl *fileLog) ToCompact() ([]ReadSegment, error) {
 	// First we need to build an index of all of the segments in time order.
 	// For this we only need the first ULID in the segment.
 	var segmentInfos []segmentInfo
@@ -239,13 +239,7 @@ func (fl *fileLog) Sequential() ([]ReadSegment, error) {
 	})
 	sort.Slice(segmentInfos, func(i, j int) bool { return segmentInfos[i].lowID < segmentInfos[j].lowID })
 
-	// We'll walk all the segments and try to get at least 2 that are
-	// small enough to compact together to the given target size.
-	const minimumSegments = 2
-	candidates := chooseFirstSequential(segmentInfos, minimumSegments, fl.segmentTargetSize)
-	if len(candidates) < minimumSegments {
-		return nil, ErrNoSegmentsAvailable // no problem
-	}
+	candidates := chooseSegmentsToCompact(segmentInfos, fl.segmentTargetSize)
 
 	// Our candidates are good enough.
 	// Create ReadSegments.
@@ -625,35 +619,26 @@ func (t fileTrashSegment) Purge() error {
 	return t.fs.Remove(t.f.Name())
 }
 
-// chooseFirstSequential segments that are small enough to compact together to
-// less than the target size. Don't bother returning anything if you can't find
-// at least minimum.
-func chooseFirstSequential(segmentInfos []segmentInfo, minimum int, targetSize int64) []string {
-	var (
-		candidates    []string
-		candidateSize int64
-	)
-	for _, si := range segmentInfos {
-		if (candidateSize + si.size) <= targetSize {
-			// We can take this segment. Merge.
-			candidates = append(candidates, si.path)
-			candidateSize += si.size
-		} else if len(candidates) >= minimum {
-			// We can't take this segment, but we have enough already. Break.
-			break
-		} else if si.size <= targetSize {
-			// We can't *take* this segment, but we can *start* with it. Reset.
-			candidates = []string{si.path}
-			candidateSize = si.size
-		} else {
-			// We can't take or start with this segment. Clear.
-			candidates = []string{}
-			candidateSize = 0
+func chooseSegmentsToCompact(segmentInfos []segmentInfo, targetSize int64) []string {
+	candidates := []string{}
+
+	var totalSize int64 = 0
+	n := 0
+
+	for _, s := range segmentInfos {
+		if s.size > targetSize {
+			continue
 		}
+
+		candidates = append(candidates, s.path)
+		n++
+		totalSize += s.size
 	}
-	if len(candidates) < minimum {
-		candidates = []string{} // oh well
+
+	if totalSize < targetSize && n < 64 {
+		return []string{}
 	}
+
 	return candidates
 }
 
